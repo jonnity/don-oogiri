@@ -49,6 +49,10 @@ export interface MatchState {
   /** initial_writingで最初に書き終えたチームが確定するまでのフラグ。 */
   initialFirstDone: boolean;
   winner: TeamId | null;
+  /** 観客投票の現在ラウンドの集計。votingフェーズ開始のたびに0にリセットされる。 */
+  audienceVotes: Record<TeamId, number>;
+  /** 投票ラウンドの識別子。votingフェーズに入るたびに+1。観客側の「このラウンドは投票済みか」判定に使う。 */
+  votingRoundId: number;
 }
 
 export type MatchEvent =
@@ -56,7 +60,9 @@ export type MatchEvent =
   | { type: "FIRST_DONE"; team: TeamId }
   | { type: "NOMINATE" }
   | { type: "ANSWER_DONE" }
-  | { type: "VOTE_RESULT"; redVotes: number; blueVotes: number };
+  | { type: "VOTE_RESULT"; redVotes: number; blueVotes: number }
+  | { type: "AUDIENCE_VOTE_CAST"; team: TeamId }
+  | { type: "CLOSE_VOTING" };
 
 export class IllegalTransitionError extends Error {
   constructor(message: string) {

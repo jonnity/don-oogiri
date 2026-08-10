@@ -49,6 +49,8 @@ export function createMatch(
     defendingTeam: null,
     initialFirstDone: false,
     winner: null,
+    audienceVotes: { red: 0, blue: 0 },
+    votingRoundId: 0,
   };
 }
 
@@ -167,7 +169,41 @@ function applyAnswerDone(state: MatchState): MatchState {
       `ANSWER_DONE requires a frozen marker (after NOMINATE) in initial_writing/challenge_writing, got phase='${state.phase}' movement='${state.movement.status}'`,
     );
   }
-  return { ...state, phase: "voting" };
+  return {
+    ...state,
+    phase: "voting",
+    audienceVotes: { red: 0, blue: 0 },
+    votingRoundId: state.votingRoundId + 1,
+  };
+}
+
+function applyAudienceVoteCast(state: MatchState, team: TeamId): MatchState {
+  if (state.phase !== "voting") {
+    throw new IllegalTransitionError(
+      `AUDIENCE_VOTE_CAST is only valid in 'voting', got '${state.phase}'`,
+    );
+  }
+  return {
+    ...state,
+    audienceVotes: {
+      ...state.audienceVotes,
+      [team]: state.audienceVotes[team] + 1,
+    },
+  };
+}
+
+function applyCloseVoting(state: MatchState, now: number): MatchState {
+  if (state.phase !== "voting") {
+    throw new IllegalTransitionError(
+      `CLOSE_VOTING is only valid in 'voting', got '${state.phase}'`,
+    );
+  }
+  return applyVoteResult(
+    state,
+    state.audienceVotes.red,
+    state.audienceVotes.blue,
+    now,
+  );
 }
 
 function incrementRunner(state: MatchState, team: TeamId): MatchState {
@@ -258,6 +294,10 @@ export function transition(
       return applyAnswerDone(current);
     case "VOTE_RESULT":
       return applyVoteResult(current, event.redVotes, event.blueVotes, now);
+    case "AUDIENCE_VOTE_CAST":
+      return applyAudienceVoteCast(current, event.team);
+    case "CLOSE_VOTING":
+      return applyCloseVoting(current, now);
     default: {
       const _exhaustive: never = event;
       throw new IllegalTransitionError(

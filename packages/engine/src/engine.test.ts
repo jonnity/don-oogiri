@@ -250,3 +250,58 @@ describe("currentWriter", () => {
     expect(currentWriter(match)).toEqual({ team: "blue", name: "青2" });
   });
 });
+
+describe("audience voting", () => {
+  it("starts each voting round with a zeroed tally and an incremented round id", () => {
+    let match = toVoting("red");
+    expect(match.audienceVotes).toEqual({ red: 0, blue: 0 });
+    expect(match.votingRoundId).toBe(1);
+  });
+
+  it("AUDIENCE_VOTE_CAST is rejected outside the voting phase", () => {
+    let match = newMatch();
+    match = transition(match, { type: "START_MATCH" }, 0);
+    match = transition(match, { type: "FIRST_DONE", team: "red" }, 0);
+    expect(() =>
+      transition(match, { type: "AUDIENCE_VOTE_CAST", team: "red" }, 1_000),
+    ).toThrow(IllegalTransitionError);
+  });
+
+  it("tallies individual votes per team", () => {
+    let match = toVoting("red");
+    match = transition(match, { type: "AUDIENCE_VOTE_CAST", team: "red" }, 13_000);
+    match = transition(match, { type: "AUDIENCE_VOTE_CAST", team: "red" }, 13_100);
+    match = transition(match, { type: "AUDIENCE_VOTE_CAST", team: "blue" }, 13_200);
+    expect(match.audienceVotes).toEqual({ red: 2, blue: 1 });
+  });
+
+  it("CLOSE_VOTING resolves using the current tally like a manual VOTE_RESULT (reversal case)", () => {
+    let match = toVoting("red");
+    match = transition(match, { type: "AUDIENCE_VOTE_CAST", team: "red" }, 13_000);
+    match = transition(match, { type: "AUDIENCE_VOTE_CAST", team: "blue" }, 13_100);
+    match = transition(match, { type: "AUDIENCE_VOTE_CAST", team: "blue" }, 13_200);
+    match = transition(match, { type: "CLOSE_VOTING" }, 13_300);
+
+    expect(match.phase).toBe("challenge_writing");
+    expect(match.advancingTeam).toBe("blue"); // 1票 vs 2票で阻止する側(blue)が勝ち反転
+  });
+
+  it("CLOSE_VOTING with a 0-0 tally falls through to the tie rule (advancing side wins)", () => {
+    let match = toVoting("red");
+    match = transition(match, { type: "CLOSE_VOTING" }, 13_000);
+    expect(match.phase).toBe("challenge_writing");
+    expect(match.advancingTeam).toBe("red");
+  });
+
+  it("resets the tally and bumps the round id again on the following round", () => {
+    let match = toVoting("red");
+    match = transition(match, { type: "AUDIENCE_VOTE_CAST", team: "red" }, 13_000);
+    match = transition(match, { type: "CLOSE_VOTING" }, 13_100); // advancing(red) wins, back to challenge_writing
+    expect(match.votingRoundId).toBe(1);
+
+    match = transition(match, { type: "NOMINATE" }, 14_000);
+    match = transition(match, { type: "ANSWER_DONE" }, 15_000);
+    expect(match.votingRoundId).toBe(2);
+    expect(match.audienceVotes).toEqual({ red: 0, blue: 0 });
+  });
+});

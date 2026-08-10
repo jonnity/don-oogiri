@@ -18,7 +18,9 @@ export interface CreateMatchResponse {
 /** サーバ→クライアント。stateは常にスナップショット全体。serverTimeはクライアントのクロックオフセット計算用。 */
 export type ServerMessage =
   | { type: "state"; state: MatchState; serverTime: number }
-  | { type: "error"; message: string };
+  | { type: "error"; message: string }
+  /** AUDIENCE_VOTE_CASTを送った本人にのみ返す個別応答（ブロードキャストしない）。 */
+  | { type: "vote_ack"; accepted: boolean; reason?: string };
 
 /** クライアント→サーバ。 */
 export type ClientMessage = { type: "event"; event: MatchEvent };
