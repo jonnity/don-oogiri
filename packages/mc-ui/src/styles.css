@@ -1,0 +1,121 @@
+/* Phase 1: 装飾不要のデバッグ用UI。見た目の演出はPhase4で行う。 */
+
+body {
+  font-family: system-ui, sans-serif;
+  margin: 0;
+  padding: 1rem;
+  background: #f3f3f3;
+  color: #222;
+}
+
+.app {
+  max-width: 640px;
+  margin: 0 auto;
+}
+
+fieldset {
+  margin-bottom: 1rem;
+}
+
+label {
+  display: block;
+  margin-bottom: 0.5rem;
+}
+
+input {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.25rem;
+}
+
+button {
+  padding: 0.5rem 1rem;
+  margin: 0.25rem 0.25rem 0.25rem 0;
+  cursor: pointer;
+}
+
+.team-fields--red {
+  border-color: #c0392b;
+}
+
+.team-fields--blue {
+  border-color: #2980b9;
+}
+
+.error {
+  color: #c0392b;
+  font-weight: bold;
+}
+
+.connection-status {
+  font-size: 0.9rem;
+  color: #555;
+}
+
+.status-grid {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.25rem 1rem;
+}
+
+.status-grid dt {
+  font-weight: bold;
+}
+
+.status-grid dd {
+  margin: 0;
+}
+
+.marker-bar {
+  margin: 1rem 0;
+}
+
+.marker-bar__track {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.marker-bar__edge {
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+
+.marker-bar__rail {
+  position: relative;
+  flex: 1;
+  height: 24px;
+  background: linear-gradient(to right, #f8d7da, #d6e9f8);
+  border: 1px solid #999;
+}
+
+.marker-bar__marker {
+  position: absolute;
+  top: -4px;
+  width: 4px;
+  height: 32px;
+  background: #222;
+  transform: translateX(-50%);
+}
+
+.marker-bar__position {
+  font-size: 0.8rem;
+  color: #555;
+  margin: 0.25rem 0 0;
+}
+
+.winner-banner {
+  font-size: 1.2rem;
+  font-weight: bold;
+}
+
+.vote-form {
+  display: flex;
+  align-items: flex-end;
+  gap: 1rem;
+}
+
+.vote-form label {
+  margin-bottom: 0;
+}
