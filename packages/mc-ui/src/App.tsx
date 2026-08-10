@@ -3,10 +3,11 @@ import type { CreateMatchRequest } from "@don-oogiri/engine";
 import { createMatch } from "./api.js";
 import { MarkerBar } from "./MarkerBar.js";
 import { MatchControls } from "./MatchControls.js";
+import { resolveServerUrl } from "./serverUrl.js";
 import { SetupForm } from "./SetupForm.js";
 import { useMatchSocket } from "./useMatchSocket.js";
 
-const SERVER_URL = import.meta.env.VITE_SERVER_URL ?? "http://localhost:8787";
+const SERVER_URL = resolveServerUrl();
 
 export function App() {
   const [matchId, setMatchId] = useState<string | null>(null);

@@ -13,3 +13,5 @@ new_sqlite_classes = ["MatchRoom"]
 
 [dev]
 port = 8787
+# WSL2からWindowsホスト経由でアクセスする場合など、localhost以外からの接続も受けられるようにする
+ip = "0.0.0.0"
