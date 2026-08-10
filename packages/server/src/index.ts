@@ -8,6 +8,19 @@ const app = new Hono<{ Bindings: Env }>();
 
 app.use("*", cors());
 
+app.get("/", (c) =>
+  c.json({
+    name: "don-oogiri-server",
+    status: "ok",
+    endpoints: [
+      "POST /api/matches",
+      "GET /api/matches/:id",
+      "POST /api/matches/:id/events",
+      "GET /api/matches/:id/ws",
+    ],
+  }),
+);
+
 function stubFor(env: Env, matchId: string) {
   const id = env.MATCH_ROOM.idFromString(matchId);
   return env.MATCH_ROOM.get(id);
