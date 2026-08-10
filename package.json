@@ -8,8 +8,12 @@
   "scripts": {
     "test": "pnpm --filter @don-oogiri/engine test",
     "test:run": "pnpm --filter @don-oogiri/engine test:run",
+    "dev": "concurrently -n server,mc-ui -c blue,magenta \"pnpm:dev:server\" \"pnpm:dev:mc-ui\"",
     "dev:server": "pnpm --filter @don-oogiri/server dev",
     "dev:mc-ui": "pnpm --filter @don-oogiri/mc-ui dev",
     "build": "pnpm -r build"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0"
   }
 }

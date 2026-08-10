@@ -16,10 +16,11 @@ pnpm install
 # engineのユニットテスト
 pnpm test
 
-# サーバ (wrangler dev, http://localhost:8787)
-pnpm dev:server
+# サーバ + MC操作卓UIを同時起動 (http://localhost:8787 / http://localhost:5173)
+pnpm dev
 
-# MC操作卓UI (http://localhost:5173)
+# 個別に起動したい場合
+pnpm dev:server
 pnpm dev:mc-ui
 ```
 
