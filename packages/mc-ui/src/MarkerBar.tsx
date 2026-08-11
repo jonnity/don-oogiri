@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { nextArrivalTime, type MatchState, type TeamId } from "@don-oogiri/engine";
+import { getMarkerPosition, nextArrivalTime, type MatchState, type TeamId } from "@don-oogiri/engine";
 
 interface MarkerBarProps {
   state: MatchState;
@@ -7,50 +7,56 @@ interface MarkerBarProps {
 }
 
 /**
- * どんじゃんけん演出: バーは常時は動かさず、
- * 「先着/指名の瞬間だけグッと動く」静止→スナップの2段階で表現する。
- * - idle→advancing（先着決定）: 自陣の端から中央まで一気に伸びる
- * - advancing中: 見た目は静止（真の到達時間は秒数テキストで表現）
- * - advancing→frozen（指名）: 静止していた位置から実際の到達位置まで一気にぶつかる
+ * どんじゃんけん演出: 先着が決まった瞬間だけ「自陣の端から一気に伸びる」スナップで見せ、
+ * advancing中はサーバ権威の位置（`getMarkerPosition`）を毎フレーム補間して滑らかに追従させる。
  */
 export function MarkerBar({ state, clockOffset }: MarkerBarProps) {
-  const [renderPosition, setRenderPosition] = useState(() => restPosition(state));
-  const prevStatusRef = useRef(state.movement.status);
   const [now, setNow] = useState(() => Date.now() + clockOffset);
+  const [snapFrom, setSnapFrom] = useState<number | null>(null);
+  const prevStatusRef = useRef(state.movement.status);
 
   useEffect(() => {
     const prevStatus = prevStatusRef.current;
-    const target = restPosition(state);
+    prevStatusRef.current = state.movement.status;
     if (prevStatus === "idle" && state.movement.status === "advancing" && state.advancingTeam) {
-      setRenderPosition(edgePosition(state.advancingTeam, state.config.laneLength));
-      const raf = requestAnimationFrame(() => setRenderPosition(target));
-      prevStatusRef.current = state.movement.status;
+      setSnapFrom(edgePosition(state.advancingTeam, state.config.laneLength));
+      const raf = requestAnimationFrame(() => setSnapFrom(null));
       return () => cancelAnimationFrame(raf);
     }
-    setRenderPosition(target);
-    prevStatusRef.current = state.movement.status;
+    setSnapFrom(null);
     return undefined;
   }, [state]);
 
+  // `now`はDate.now()を毎フレーム取り直さず、この時点のDate.now()を一度だけ基準点として
+  // 記録し、以降はperformance.now()（単調増加が保証される）の経過分だけ進める。
+  // Date.now()は壁時計なので、OSのクロック補正（WSL2のホスト時刻再同期など）で
+  // 一瞬巻き戻ることがあり、毎フレーム取り直すとマーカーが後退して見える原因になる。
+  // 念のためMath.maxで単調増加も強制し、他要因での後退も構造的に防ぐ。
   useEffect(() => {
-    if (state.movement.status !== "advancing") {
-      setNow(Date.now() + clockOffset);
-      return;
-    }
+    const nowAnchor = Date.now() + clockOffset;
+    const perfAnchor = performance.now();
+    setNow((prev) => Math.max(prev, nowAnchor));
+    if (state.movement.status !== "advancing") return undefined;
     let raf: number;
     const tick = () => {
-      setNow(Date.now() + clockOffset);
+      setNow((prev) => Math.max(prev, nowAnchor + (performance.now() - perfAnchor)));
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
   }, [state, clockOffset]);
 
+  const renderPosition = snapFrom ?? getMarkerPosition(state, now);
   const percent = (renderPosition / state.config.laneLength) * 100;
   const hasStarted = state.movement.status !== "idle";
   const arrivalTime = nextArrivalTime(state);
   const secondsToEdge =
     arrivalTime !== null ? Math.max(0, (arrivalTime - now) / 1000) : null;
+  // advancing中は毎フレーム実位置を反映するので、CSS transitionに頼らず即時反映する
+  // （450msのtransitionに16ms間隔で新しい目標値を与え続けると、レンダラによっては
+  // リターゲティングが追いつかず視覚的に静止して見えることがあるため）。
+  const isTicking = snapFrom === null && state.movement.status === "advancing";
+  const noTransitionStyle = isTicking ? { transitionDuration: "0ms" } : undefined;
 
   return (
     <div className="marker-bar">
@@ -63,15 +69,18 @@ export function MarkerBar({ state, clockOffset }: MarkerBarProps) {
             <>
               <div
                 className="marker-bar__fill marker-bar__fill--red"
-                style={{ width: `${percent}%` }}
+                style={{ width: `${percent}%`, ...noTransitionStyle }}
               />
               <div
                 className="marker-bar__fill marker-bar__fill--blue"
-                style={{ width: `${100 - percent}%` }}
+                style={{ width: `${100 - percent}%`, ...noTransitionStyle }}
               />
             </>
           )}
-          <div className="marker-bar__marker" style={{ left: `${percent}%` }} />
+          <div
+            className="marker-bar__marker"
+            style={{ left: `${percent}%`, ...noTransitionStyle }}
+          />
         </div>
         <span className="marker-bar__edge marker-bar__edge--blue">
           🔵 {state.teams.blue.name}
@@ -80,14 +89,6 @@ export function MarkerBar({ state, clockOffset }: MarkerBarProps) {
       <p className="marker-bar__position">{describeStatus(state, secondsToEdge)}</p>
     </div>
   );
-}
-
-/** advancing中はレグ開始位置で静止、frozen中は実際の到達位置。idleは中央。 */
-function restPosition(state: MatchState): number {
-  const { movement, config } = state;
-  if (movement.status === "advancing") return movement.startPosition;
-  if (movement.status === "frozen") return movement.position;
-  return config.laneLength / 2;
 }
 
 function edgePosition(team: TeamId, laneLength: number): number {

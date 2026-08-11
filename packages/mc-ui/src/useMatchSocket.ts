@@ -18,6 +18,7 @@ export function useMatchSocket(baseUrl: string, matchId: string | null): MatchSo
   const [status, setStatus] = useState<ConnectionStatus>("idle");
   const [lastError, setLastError] = useState<string | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
+  const bestClockOffsetRef = useRef(-Infinity);
 
   useEffect(() => {
     if (!matchId) {
@@ -26,6 +27,7 @@ export function useMatchSocket(baseUrl: string, matchId: string | null): MatchSo
       return;
     }
 
+    bestClockOffsetRef.current = -Infinity;
     const wsUrl = `${baseUrl.replace(/^http/, "ws")}/api/matches/${matchId}/ws`;
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
@@ -38,7 +40,14 @@ export function useMatchSocket(baseUrl: string, matchId: string | null): MatchSo
       const message: ServerMessage = JSON.parse(event.data as string);
       if (message.type === "state") {
         setState(message.state);
-        setClockOffset(message.serverTime - Date.now());
+        // serverTime - Date.now() は「真のクロックオフセット - 片道ネットワーク遅延」を表す。
+        // 遅延は毎回変動しノイズになるので、遅延が最小だった（＝この値が最大だった）サンプルを
+        // 採用し続けることで、マーカー位置補間が遅延ジッターで一瞬後退して見える現象を防ぐ。
+        const sample = message.serverTime - Date.now();
+        if (sample > bestClockOffsetRef.current) {
+          bestClockOffsetRef.current = sample;
+          setClockOffset(sample);
+        }
         setLastError(null);
       } else if (message.type === "error") {
         setLastError(message.message);
