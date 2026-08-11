@@ -1,0 +1,104 @@
+/* スマホ前提。装飾は最小限、タップしやすさを優先。 */
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  font-family: system-ui, sans-serif;
+  margin: 0;
+  padding: 1rem;
+  background: #f3f3f3;
+  color: #222;
+}
+
+.app {
+  max-width: 480px;
+  margin: 0 auto;
+  text-align: center;
+}
+
+h1 {
+  font-size: 1.2rem;
+}
+
+.join-form {
+  margin-top: 1.5rem;
+}
+
+.join-form label {
+  display: block;
+  margin-bottom: 0.5rem;
+  text-align: left;
+}
+
+.join-form input {
+  width: 100%;
+  padding: 0.5rem;
+  font-size: 1rem;
+}
+
+.join-form button {
+  width: 100%;
+  padding: 0.75rem;
+  margin-top: 0.5rem;
+  font-size: 1rem;
+}
+
+.connection-status {
+  font-size: 0.8rem;
+  color: #777;
+}
+
+.phase-view {
+  margin-top: 2rem;
+}
+
+.phase-label {
+  font-size: 1.1rem;
+  font-weight: bold;
+}
+
+.match-context {
+  font-size: 1rem;
+  color: #444;
+}
+
+.vote-buttons {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  margin-top: 1.5rem;
+}
+
+.vote-buttons button {
+  padding: 2rem 0.5rem;
+  font-size: 1.3rem;
+  font-weight: bold;
+  border: none;
+  border-radius: 12px;
+  color: white;
+  cursor: pointer;
+}
+
+.vote-buttons__red {
+  background: #c0392b;
+}
+
+.vote-buttons__blue {
+  background: #2980b9;
+}
+
+.vote-buttons button:active {
+  filter: brightness(0.85);
+}
+
+.winner-banner {
+  font-size: 1.4rem;
+  font-weight: bold;
+}
+
+.error {
+  color: #c0392b;
+  font-size: 0.85rem;
+}
