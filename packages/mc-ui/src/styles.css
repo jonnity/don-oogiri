@@ -86,8 +86,26 @@ button {
   position: relative;
   flex: 1;
   height: 24px;
-  background: linear-gradient(to right, #f8d7da, #d6e9f8);
+  background: #ccc;
   border: 1px solid #999;
+  overflow: hidden;
+}
+
+.marker-bar__fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  transition: width 450ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.marker-bar__fill--red {
+  left: 0;
+  background: #c0392b;
+}
+
+.marker-bar__fill--blue {
+  right: 0;
+  background: #2980b9;
 }
 
 .marker-bar__marker {
@@ -97,6 +115,8 @@ button {
   height: 32px;
   background: #222;
   transform: translateX(-50%);
+  z-index: 1;
+  transition: left 450ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .marker-bar__position {
