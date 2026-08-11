@@ -8,6 +8,7 @@ import {
   type CreateMatchRequest,
   type MatchState,
   type ServerMessage,
+  type TeamId,
 } from "@don-oogiri/engine";
 import type { Env } from "./env.js";
 
@@ -16,6 +17,11 @@ const STORAGE_KEY = "match";
 export class MatchRoom implements DurableObject {
   private state: DurableObjectState;
   private sessions = new Set<WebSocket>();
+  /** 観客の投票dedup用。voterIdはURLクエリ(?voterId=)でWebSocket接続ごとに紐づける。 */
+  private voterIds = new Map<WebSocket, string>();
+  /** voterId -> 最後に投票したvotingRoundId。1端末1票(ラウンドごと)の判定に使う。DO再起動でリセットされるが、
+   * イベント用途の緩い不正対策として許容する(spec: 不正対策はゆるくてよい)。 */
+  private votedRoundByVoter = new Map<string, number>();
   private match: MatchState | null = null;
   private loaded = false;
 
@@ -85,11 +91,15 @@ export class MatchRoom implements DurableObject {
     if (request.headers.get("Upgrade") !== "websocket") {
       return new Response("Expected websocket", { status: 426 });
     }
+    const voterId = new URL(request.url).searchParams.get("voterId");
     const pair = new WebSocketPair();
     const client = pair[0];
     const server = pair[1];
     server.accept();
     this.sessions.add(server);
+    if (voterId) {
+      this.voterIds.set(server, voterId);
+    }
 
     if (this.match) {
       const message: ServerMessage = {
@@ -105,9 +115,11 @@ export class MatchRoom implements DurableObject {
     });
     server.addEventListener("close", () => {
       this.sessions.delete(server);
+      this.voterIds.delete(server);
     });
     server.addEventListener("error", () => {
       this.sessions.delete(server);
+      this.voterIds.delete(server);
     });
 
     return new Response(null, { status: 101, webSocket: client });
@@ -132,6 +144,10 @@ export class MatchRoom implements DurableObject {
       this.sendError(ws, "match not created yet");
       return;
     }
+    if (message.event.type === "AUDIENCE_VOTE_CAST") {
+      await this.handleAudienceVoteCast(ws, message.event.team);
+      return;
+    }
     try {
       const next = transition(this.match, message.event, Date.now());
       await this.save(next);
@@ -140,8 +156,46 @@ export class MatchRoom implements DurableObject {
     }
   }
 
+  /** 観客の1票。voterId必須・1端末1票(votingRoundIdごと)をここでチェックしてからengineへ委譲する。 */
+  private async handleAudienceVoteCast(ws: WebSocket, team: TeamId): Promise<void> {
+    if (!this.match) return;
+    const voterId = this.voterIds.get(ws);
+    if (!voterId) {
+      this.sendVoteAck(ws, false, "voterId is required to vote");
+      return;
+    }
+    if (this.votedRoundByVoter.get(voterId) === this.match.votingRoundId) {
+      this.sendVoteAck(ws, false, "already voted this round");
+      return;
+    }
+    try {
+      const next = transition(
+        this.match,
+        { type: "AUDIENCE_VOTE_CAST", team },
+        Date.now(),
+      );
+      await this.save(next);
+      // dedup記録はtransition成功後に行う。失敗時に投票権を失わせないため。
+      this.votedRoundByVoter.set(voterId, next.votingRoundId);
+      this.sendVoteAck(ws, true);
+    } catch (err) {
+      this.sendVoteAck(
+        ws,
+        false,
+        err instanceof IllegalTransitionError ? err.message : "unexpected error",
+      );
+    }
+  }
+
   private sendError(ws: WebSocket, msg: string): void {
     const message: ServerMessage = { type: "error", message: msg };
+    ws.send(JSON.stringify(message));
+  }
+
+  private sendVoteAck(ws: WebSocket, accepted: boolean, reason?: string): void {
+    const message: ServerMessage = reason
+      ? { type: "vote_ack", accepted, reason }
+      : { type: "vote_ack", accepted };
     ws.send(JSON.stringify(message));
   }
 
