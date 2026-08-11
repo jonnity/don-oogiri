@@ -8,9 +8,10 @@
   "scripts": {
     "test": "pnpm --filter @don-oogiri/engine test",
     "test:run": "pnpm --filter @don-oogiri/engine test:run",
-    "dev": "concurrently -n server,mc-ui -c blue,magenta \"pnpm:dev:server\" \"pnpm:dev:mc-ui\"",
+    "dev": "concurrently -n server,mc-ui,audience-ui -c blue,magenta,green \"pnpm:dev:server\" \"pnpm:dev:mc-ui\" \"pnpm:dev:audience-ui\"",
     "dev:server": "pnpm --filter @don-oogiri/server dev",
     "dev:mc-ui": "pnpm --filter @don-oogiri/mc-ui dev",
+    "dev:audience-ui": "pnpm --filter @don-oogiri/audience-ui dev",
     "build": "pnpm -r build"
   },
   "devDependencies": {
