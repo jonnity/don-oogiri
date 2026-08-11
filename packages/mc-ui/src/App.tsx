@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { CreateMatchRequest } from "@don-oogiri/engine";
+import { AudienceLink } from "./AudienceLink.js";
 import { createMatch } from "./api.js";
 import { MarkerBar } from "./MarkerBar.js";
 import { MatchControls } from "./MatchControls.js";
@@ -45,6 +46,7 @@ export function App() {
             <button onClick={() => setMatchId(null)}>新しい試合を作る</button>
           </p>
           {lastError && <p className="error">サーバーエラー: {lastError}</p>}
+          <AudienceLink matchId={matchId} />
           {state ? (
             <>
               <MarkerBar state={state} clockOffset={clockOffset} />

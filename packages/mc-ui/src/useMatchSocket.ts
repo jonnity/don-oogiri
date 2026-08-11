@@ -40,9 +40,10 @@ export function useMatchSocket(baseUrl: string, matchId: string | null): MatchSo
         setState(message.state);
         setClockOffset(message.serverTime - Date.now());
         setLastError(null);
-      } else {
+      } else if (message.type === "error") {
         setLastError(message.message);
       }
+      // vote_ackはAUDIENCE_VOTE_CASTを送るクライアント(観客ページ)向け。MC操作卓は無視してよい。
     });
 
     return () => {

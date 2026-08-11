@@ -76,10 +76,27 @@ function renderActions(state: MatchState, onSend: (event: MatchEvent) => void) {
   }
 
   if (state.phase === "voting") {
-    return <VoteForm onSend={onSend} />;
+    return <VotingControls state={state} onSend={onSend} />;
   }
 
   return null;
+}
+
+function VotingControls({ state, onSend }: MatchControlsProps) {
+  return (
+    <div className="voting-controls">
+      <p className="audience-tally">
+        観客投票 現在の集計: 🔴 {state.audienceVotes.red} - 🔵 {state.audienceVotes.blue}
+      </p>
+      <button className="close-voting" onClick={() => onSend({ type: "CLOSE_VOTING" })}>
+        投票を締め切る（この集計で確定）
+      </button>
+      <details className="manual-vote-fallback">
+        <summary>観客投票を使わない場合：票数を手入力して確定</summary>
+        <VoteForm onSend={onSend} />
+      </details>
+    </div>
+  );
 }
 
 function VoteForm({ onSend }: { onSend: (event: MatchEvent) => void }) {

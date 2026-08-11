@@ -119,3 +119,32 @@ button {
 .vote-form label {
   margin-bottom: 0;
 }
+
+.audience-link {
+  font-size: 0.85rem;
+  background: #fff;
+  border: 1px solid #ccc;
+  padding: 0.5rem;
+  margin: 0.75rem 0;
+  word-break: break-all;
+}
+
+.voting-controls {
+  margin-top: 0.5rem;
+}
+
+.audience-tally {
+  font-size: 1.1rem;
+  font-weight: bold;
+}
+
+.close-voting {
+  font-size: 1rem;
+  padding: 0.6rem 1.2rem;
+}
+
+.manual-vote-fallback {
+  margin-top: 1rem;
+  font-size: 0.85rem;
+  color: #555;
+}
