@@ -12,7 +12,9 @@
     "dev:server": "pnpm --filter @don-oogiri/server dev",
     "dev:mc-ui": "pnpm --filter @don-oogiri/mc-ui dev",
     "dev:audience-ui": "pnpm --filter @don-oogiri/audience-ui dev",
-    "build": "pnpm -r build"
+    "build": "pnpm -r build",
+    "tauri:dev": "pnpm --filter @don-oogiri/mc-ui tauri dev",
+    "tauri:build": "pnpm --filter @don-oogiri/mc-ui tauri build"
   },
   "devDependencies": {
     "concurrently": "^9.1.0"

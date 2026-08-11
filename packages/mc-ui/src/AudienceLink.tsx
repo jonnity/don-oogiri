@@ -2,18 +2,17 @@ import { useState } from "react";
 
 interface AudienceLinkProps {
   matchId: string;
+  audienceBaseUrl: string;
 }
 
-const AUDIENCE_UI_PORT = "5174";
-
-/** 観客投票ページへのURL。Phase3で投影画面にQRコードとして表示する予定（現時点ではURLのみ）。 */
-function buildAudienceUrl(matchId: string): string {
-  return `${window.location.protocol}//${window.location.hostname}:${AUDIENCE_UI_PORT}/?m=${matchId}`;
+/** 観客投票ページへのURL。投影画面ではこのURLをQRコード化する。 */
+export function buildAudienceUrl(audienceBaseUrl: string, matchId: string): string {
+  return `${audienceBaseUrl.replace(/\/$/, "")}/?m=${matchId}`;
 }
 
-export function AudienceLink({ matchId }: AudienceLinkProps) {
+export function AudienceLink({ matchId, audienceBaseUrl }: AudienceLinkProps) {
   const [copied, setCopied] = useState(false);
-  const url = buildAudienceUrl(matchId);
+  const url = buildAudienceUrl(audienceBaseUrl, matchId);
 
   async function handleCopy() {
     try {
@@ -28,7 +27,7 @@ export function AudienceLink({ matchId }: AudienceLinkProps) {
   return (
     <div className="audience-link">
       <p>
-        観客投票URL（スマホで開く。QRコード化はPhase3で対応）:
+        観客投票URL（スマホで開く。QRコードは投影画面に表示されます）:
         <br />
         <a href={url} target="_blank" rel="noreferrer">
           {url}
