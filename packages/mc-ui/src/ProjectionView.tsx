@@ -39,6 +39,10 @@ export function ProjectionView({ serverUrl, audienceBaseUrl, matchId }: Projecti
   return (
     <main className="projection">
       <h1 className="projection__phase">{PHASE_LABEL[state.phase]}</h1>
+      <p className="projection__topic">
+        <span className="projection__topic-label">お題</span>
+        {state.topic}
+      </p>
       <MarkerBar state={state} clockOffset={clockOffset} />
       {writer && (
         <p className="projection__writer">
@@ -50,10 +54,12 @@ export function ProjectionView({ serverUrl, audienceBaseUrl, matchId }: Projecti
           🏆 勝者: {state.winner ? state.teams[state.winner].name : "-"}
         </p>
       )}
-      <div className="projection__qr">
-        <QRCodeSVG value={audienceUrl} size={200} />
-        <p>スマホで投票に参加</p>
-      </div>
+      {state.qrVisible && (
+        <div className="projection__qr">
+          <QRCodeSVG value={audienceUrl} size={200} />
+          <p>スマホで投票に参加</p>
+        </div>
+      )}
     </main>
   );
 }

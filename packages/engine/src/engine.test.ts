@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { createMatch, currentWriter, getMarkerPosition, transition } from "./engine.js";
+import {
+  createMatch,
+  currentWriter,
+  getMarkerPosition,
+  nextArrivalTime,
+  transition,
+} from "./engine.js";
 import { IllegalTransitionError, type MatchState } from "./types.js";
 
 const CONFIG = { laneLength: 100, centerToEdgeMs: 90_000 };
@@ -9,6 +15,7 @@ function newMatch(): MatchState {
     CONFIG,
     { name: "赤チーム", members: ["赤1", "赤2", "赤3"] },
     { name: "青チーム", members: ["青1", "青2", "青3"] },
+    "テストのお題",
   );
 }
 
@@ -26,8 +33,17 @@ describe("createMatch", () => {
         { laneLength: 0, centerToEdgeMs: 1000 },
         { name: "赤", members: ["a", "b", "c"] },
         { name: "青", members: ["d", "e", "f"] },
+        "お題",
       ),
     ).toThrow(IllegalTransitionError);
+  });
+
+  it("starts with the given topic, QR visible, and 1x speed", () => {
+    const match = newMatch();
+    expect(match.topic).toBe("テストのお題");
+    expect(match.qrVisible).toBe(true);
+    expect(match.speedMultiplier).toBe(1);
+    expect(match.answerLog).toEqual([]);
   });
 });
 
@@ -303,5 +319,180 @@ describe("audience voting", () => {
     match = transition(match, { type: "ANSWER_DONE" }, 15_000);
     expect(match.votingRoundId).toBe(2);
     expect(match.audienceVotes).toEqual({ red: 0, blue: 0 });
+  });
+});
+
+describe("answer text log (optional feature)", () => {
+  it("records FIRST_DONE and ANSWER_DONE text when provided", () => {
+    let match = newMatch();
+    match = transition(match, { type: "START_MATCH" }, 0);
+    match = transition(
+      match,
+      { type: "FIRST_DONE", team: "red", text: "赤の一発目" },
+      0,
+    );
+    match = transition(match, { type: "NOMINATE" }, 9_000);
+    match = transition(match, { type: "ANSWER_DONE", text: "青の返し" }, 10_000);
+    expect(match.answerLog).toEqual([
+      { team: "red", text: "赤の一発目", recordedAt: 0 },
+      { team: "blue", text: "青の返し", recordedAt: 10_000 },
+    ]);
+  });
+
+  it("does not record an entry when text is omitted or blank", () => {
+    let match = newMatch();
+    match = transition(match, { type: "START_MATCH" }, 0);
+    match = transition(match, { type: "FIRST_DONE", team: "red" }, 0);
+    match = transition(match, { type: "NOMINATE" }, 9_000);
+    match = transition(match, { type: "ANSWER_DONE", text: "   " }, 10_000);
+    expect(match.answerLog).toEqual([]);
+  });
+});
+
+describe("SET_TOPIC", () => {
+  it("corrects the topic text", () => {
+    let match = newMatch();
+    match = transition(match, { type: "SET_TOPIC", topic: "修正後のお題" }, 0);
+    expect(match.topic).toBe("修正後のお題");
+  });
+
+  it("rejects an empty topic", () => {
+    const match = newMatch();
+    expect(() =>
+      transition(match, { type: "SET_TOPIC", topic: "   " }, 0),
+    ).toThrow(IllegalTransitionError);
+  });
+});
+
+describe("SET_QR_VISIBLE", () => {
+  it("toggles qrVisible", () => {
+    let match = newMatch();
+    expect(match.qrVisible).toBe(true);
+    match = transition(match, { type: "SET_QR_VISIBLE", visible: false }, 0);
+    expect(match.qrVisible).toBe(false);
+  });
+});
+
+describe("SET_SPEED_MULTIPLIER", () => {
+  it("keeps the interpolated position continuous across a live speed change while advancing", () => {
+    let match = newMatch();
+    match = transition(match, { type: "START_MATCH" }, 0);
+    match = transition(match, { type: "FIRST_DONE", team: "red" }, 0);
+    const posBefore = getMarkerPosition(match, 9_000);
+
+    match = transition(
+      match,
+      { type: "SET_SPEED_MULTIPLIER", multiplier: 5 },
+      9_000,
+    );
+    expect(match.speedMultiplier).toBe(5);
+    const posJustAfter = getMarkerPosition(match, 9_000);
+    expect(posJustAfter).toBeCloseTo(posBefore, 10);
+
+    // 5倍速なので、その後の同じ経過時間でより速く進む
+    const posLater = getMarkerPosition(match, 10_000);
+    expect(posLater - posJustAfter).toBeCloseTo(5 * (50 / 90_000) * 1_000, 5);
+  });
+
+  it("rejects a non-positive multiplier", () => {
+    const match = newMatch();
+    expect(() =>
+      transition(match, { type: "SET_SPEED_MULTIPLIER", multiplier: 0 }, 0),
+    ).toThrow(IllegalTransitionError);
+  });
+
+  it("updates the alarm arrival time (nextArrivalTime) to reflect the new speed", () => {
+    let match = newMatch();
+    match = transition(match, { type: "START_MATCH" }, 0);
+    match = transition(match, { type: "FIRST_DONE", team: "red" }, 0);
+    const arrivalAt1x = nextArrivalTime(match)!;
+
+    match = transition(
+      match,
+      { type: "SET_SPEED_MULTIPLIER", multiplier: 10 },
+      0,
+    );
+    const arrivalAt10x = nextArrivalTime(match)!;
+    expect(arrivalAt10x).toBeLessThan(arrivalAt1x);
+  });
+});
+
+describe("CORRECT_MARKER_POSITION", () => {
+  it("updates a frozen marker's position directly", () => {
+    let match = toVoting("red");
+    match = transition(
+      match,
+      { type: "CORRECT_MARKER_POSITION", position: 70 },
+      13_000,
+    );
+    expect(match.movement).toEqual({ status: "frozen", position: 70 });
+  });
+
+  it("rebases an advancing marker so its position stays continuous going forward", () => {
+    let match = newMatch();
+    match = transition(match, { type: "START_MATCH" }, 0);
+    match = transition(match, { type: "FIRST_DONE", team: "red" }, 0);
+    match = transition(
+      match,
+      { type: "CORRECT_MARKER_POSITION", position: 80 },
+      9_000,
+    );
+    expect(getMarkerPosition(match, 9_000)).toBeCloseTo(80, 10);
+    expect(getMarkerPosition(match, 10_000)).toBeGreaterThan(80);
+  });
+
+  it("clamps out-of-range values and finishes the match if the correction reaches the edge while advancing", () => {
+    let match = newMatch();
+    match = transition(match, { type: "START_MATCH" }, 0);
+    match = transition(match, { type: "FIRST_DONE", team: "red" }, 0);
+    match = transition(
+      match,
+      { type: "CORRECT_MARKER_POSITION", position: 999 },
+      9_000,
+    );
+    expect(match.phase).toBe("finished");
+    expect(match.winner).toBe("red");
+  });
+
+  it("rejects correction while idle (no marker has moved yet)", () => {
+    let match = newMatch();
+    match = transition(match, { type: "START_MATCH" }, 0);
+    expect(() =>
+      transition(match, { type: "CORRECT_MARKER_POSITION", position: 60 }, 0),
+    ).toThrow(IllegalTransitionError);
+  });
+});
+
+describe("RESET_MATCH", () => {
+  it("returns to setup while preserving teams, topic, config, and votingRoundId", () => {
+    let match = toVoting("red");
+    match = transition(match, { type: "VOTE_RESULT", redVotes: 5, blueVotes: 1 }, 13_000);
+    const roundIdBeforeReset = match.votingRoundId;
+
+    match = transition(match, { type: "RESET_MATCH" }, 20_000);
+
+    expect(match.phase).toBe("setup");
+    expect(match.movement).toEqual({ status: "idle" });
+    expect(match.advancingTeam).toBeNull();
+    expect(match.defendingTeam).toBeNull();
+    expect(match.initialFirstDone).toBe(false);
+    expect(match.winner).toBeNull();
+    expect(match.audienceVotes).toEqual({ red: 0, blue: 0 });
+    expect(match.teams.red.nextRunnerIndex).toBe(0);
+    expect(match.teams.blue.nextRunnerIndex).toBe(0);
+    expect(match.teams.red.name).toBe("赤チーム");
+    expect(match.topic).toBe("テストのお題");
+    expect(match.config).toEqual(CONFIG);
+    // votingRoundIdはリセットしない: DO側の投票dedupが直前のラウンドを覚えているため、
+    // 0に戻すと直前ラウンドの投票者が二重投票できてしまう。
+    expect(match.votingRoundId).toBe(roundIdBeforeReset);
+    expect(match.answerLog).toEqual([]);
+  });
+
+  it("allows a fresh START_MATCH after reset", () => {
+    let match = toVoting("red");
+    match = transition(match, { type: "RESET_MATCH" }, 20_000);
+    match = transition(match, { type: "START_MATCH" }, 20_000);
+    expect(match.phase).toBe("initial_writing");
   });
 });

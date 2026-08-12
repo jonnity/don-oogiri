@@ -21,6 +21,8 @@ export function MatchControls({ state, onSend }: MatchControlsProps) {
     <div className="match-controls">
       <h2>状態</h2>
       <dl className="status-grid">
+        <dt>お題</dt>
+        <dd className="status-grid__topic">{state.topic}</dd>
         <dt>フェーズ</dt>
         <dd>{PHASE_LABEL[state.phase]}</dd>
         <dt>進んでる側</dt>
@@ -40,7 +42,24 @@ export function MatchControls({ state, onSend }: MatchControlsProps) {
           🏆 勝者: {state.winner ? teamLabel(state, state.winner) : "-"}
         </p>
       )}
+
+      {state.answerLog.length > 0 && <AnswerLog state={state} />}
     </div>
+  );
+}
+
+function AnswerLog({ state }: { state: MatchState }) {
+  return (
+    <details className="answer-log">
+      <summary>回答テキストの履歴（{state.answerLog.length}件）</summary>
+      <ol>
+        {state.answerLog.map((entry, i) => (
+          <li key={i}>
+            {teamLabel(state, entry.team)}: {entry.text}
+          </li>
+        ))}
+      </ol>
+    </details>
   );
 }
 
@@ -71,7 +90,7 @@ function renderActions(state: MatchState, onSend: (event: MatchEvent) => void) {
       return <button onClick={() => onSend({ type: "NOMINATE" })}>指名（前進ストップ）</button>;
     }
     if (state.movement.status === "frozen") {
-      return <button onClick={() => onSend({ type: "ANSWER_DONE" })}>回答完了 → 投票へ</button>;
+      return <AnswerDoneForm onSend={onSend} />;
     }
   }
 
@@ -80,6 +99,28 @@ function renderActions(state: MatchState, onSend: (event: MatchEvent) => void) {
   }
 
   return null;
+}
+
+function AnswerDoneForm({ onSend }: { onSend: (event: MatchEvent) => void }) {
+  const [text, setText] = useState("");
+
+  return (
+    <div className="answer-done-form">
+      <label>
+        回答内容（任意）
+        <input
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          placeholder="口頭発表が基本。記録したい場合のみ入力"
+        />
+      </label>
+      <button
+        onClick={() => onSend({ type: "ANSWER_DONE", text: text.trim() || undefined })}
+      >
+        回答完了 → 投票へ
+      </button>
+    </div>
+  );
 }
 
 function VotingControls({ state, onSend }: MatchControlsProps) {

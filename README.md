@@ -1,4 +1,4 @@
-# ドン大喜利 (Phase 1: コアエンジン / Phase 2: 観客投票 / Phase 3: ネイティブアプリ化)
+# ドン大喜利 (Phase 1: コアエンジン / Phase 2: 観客投票 / Phase 3: ネイティブアプリ化 / Phase 5: 運用機能)
 
 `don-oogiri-spec.md` / `GOAL.md` / `GOAL_PHASE3.md` に基づく実装。pnpm workspaceのmonorepo構成。
 
@@ -51,7 +51,14 @@ MC操作卓のネイティブウィンドウから「投影画面を開く」ボ
 - **Phase 1（コアエンジン）**: `GOAL.md` の Definition of Done を満たす。
 - **Phase 2（観客投票）**: QR join想定の`?m=`パラメータでの参加、匿名の1端末1票（localStorageのvoterId）、リアルタイム集計、MCによる締め切り（同数票は進んでる側の勝ち）、スマホのスリープ復帰を想定した自動再接続を実装。
 - **Phase 3（ネイティブアプリ化）**: `GOAL_PHASE3.md` の Definition of Done を満たす。MC操作卓のTauriラップ、投影画面の新設とQRコード表示、接続設定のTauri対応。開発環境がWSL2 LinuxのためMac/Windows実機でのインストーラ検証は未実施（Linux上での`tauri dev`起動確認まで）。
-- 引き続きスコープ外: 投影画面の演出・アニメーション（**Phase4は一旦スキップ**。試作した演出が狙い通りでなかったため保留し、Phase5以降で機能が固まってから最終調整として作り直す）、Mac/Windows実機でのインストーラビルド・配布・署名、マーカー速度のライブ調整・手動補正・試合リセット（Phase5）、回答テキスト保存（Phase5）、認証/D1永続化、DOC統合（Phase6）。
+- **Phase 5（運用機能）**: `don-oogiri-spec.md` 5章のPhase5項目を実装。
+  - **お題の表示・訂正**: 試合作成時にお題を必須入力し、`MatchState.topic`としてサーバ権威で保持。投影画面に常時大きく表示する。誤字修正用に`SET_TOPIC`イベントをMC操作卓の運用ツールから送れる（ゲーム性に関わる「お題チェンジ」ではなく表記訂正のみを想定）。
+  - **QRコードの表示切り替え**: 投影画面のQRコードは常時表示ではなく`MatchState.qrVisible`で管理し、MC操作卓の「QRコードを表示/隠す」ボタンで切り替える。画面の主役をお題に譲れるようにするための調整。
+  - **前進速度のライブ調整・リハーサル早送り**: `config.centerToEdgeMs`は変更せず、`speedMultiplier`倍率を`SET_SPEED_MULTIPLIER`で切り替える単一の仕組みで両方をカバーする。advancing中に倍率を変更した場合は現在位置を基準にstartPosition/startTimeを引き継ぎ直し、位置の巻き戻り・急なジャンプを防ぐ。
+  - **マーカー位置の手動補正（トラブルリカバリ）**: `CORRECT_MARKER_POSITION`イベント。advancing/frozen中のみ有効（idle中は常に中央固定なので対象外）。advancing中に端(0/laneLength)へ補正すると、そのままcheckArrivalにより試合が確定する（MCが「到達とみなす」ための意図的なショートカット）。
+  - **試合リセット**: `RESET_MATCH`イベント。チーム名・メンバー・お題・パラメータ・速度倍率・QR表示設定は維持したまま、進行状態（フェーズ・マーカー・投票集計・次走者インデックス）だけをsetup直後に戻す。ただし`votingRoundId`はリセットしない（DO側の観客投票dedupが直前のラウンドを覚えているため、0に戻すと直前投票者が二重投票できてしまう）。
+  - **回答テキスト入力（任意機能）**: `FIRST_DONE`/`ANSWER_DONE`イベントに任意の`text`を添えると`MatchState.answerLog`に記録される。MC操作卓に入力欄と履歴表示があるが、口頭発表が基本という運用方針は変えず、入力は完全に任意。
+- 引き続きスコープ外: 投影画面の演出・アニメーション（**Phase4は一旦スキップ**。試作した演出が狙い通りでなかったため保留し、Phase5以降で機能が固まってから最終調整として作り直す）、Mac/Windows実機でのインストーラビルド・配布・署名、認証/D1永続化、DOC統合（Phase6）。
 
 ## 懸念点メモ（`don-oogiri-spec.md` 6. リスク・要検討 対応）
 

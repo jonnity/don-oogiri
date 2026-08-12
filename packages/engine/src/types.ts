@@ -37,6 +37,13 @@ export type Phase =
   | "challenge_writing"
   | "finished";
 
+/** 回答テキスト入力（任意機能）。MCが入力した場合のみ記録される。 */
+export interface AnswerLogEntry {
+  team: TeamId;
+  text: string;
+  recordedAt: number;
+}
+
 export interface MatchState {
   phase: Phase;
   config: MatchConfig;
@@ -53,16 +60,29 @@ export interface MatchState {
   audienceVotes: Record<TeamId, number>;
   /** 投票ラウンドの識別子。votingフェーズに入るたびに+1。観客側の「このラウンドは投票済みか」判定に使う。 */
   votingRoundId: number;
+  /** この試合のお題。1試合1お題固定（spec通り）だが、誤字修正のためSET_TOPICで訂正可能。 */
+  topic: string;
+  /** 投影画面のQRコード表示状態。常時表示ではなく、MCが必要なタイミングだけ表示する運用を想定。 */
+  qrVisible: boolean;
+  /** 前進速度の倍率（デフォルト1）。config.centerToEdgeMsは変えずに、ライブ調整・リハーサル早送りに使う。 */
+  speedMultiplier: number;
+  /** 回答テキストの履歴（任意機能）。MCが入力した回答のみ記録される。 */
+  answerLog: AnswerLogEntry[];
 }
 
 export type MatchEvent =
   | { type: "START_MATCH" }
-  | { type: "FIRST_DONE"; team: TeamId }
+  | { type: "FIRST_DONE"; team: TeamId; text?: string }
   | { type: "NOMINATE" }
-  | { type: "ANSWER_DONE" }
+  | { type: "ANSWER_DONE"; text?: string }
   | { type: "VOTE_RESULT"; redVotes: number; blueVotes: number }
   | { type: "AUDIENCE_VOTE_CAST"; team: TeamId }
-  | { type: "CLOSE_VOTING" };
+  | { type: "CLOSE_VOTING" }
+  | { type: "SET_TOPIC"; topic: string }
+  | { type: "SET_QR_VISIBLE"; visible: boolean }
+  | { type: "SET_SPEED_MULTIPLIER"; multiplier: number }
+  | { type: "CORRECT_MARKER_POSITION"; position: number }
+  | { type: "RESET_MATCH" };
 
 export class IllegalTransitionError extends Error {
   constructor(message: string) {

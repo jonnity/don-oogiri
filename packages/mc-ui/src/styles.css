@@ -15,6 +15,7 @@ body {
 
 fieldset {
   margin-bottom: 1rem;
+  border: 1px solid #ccc;
 }
 
 label {
@@ -202,4 +203,69 @@ button {
 
 .projection__qr {
   margin-top: 1.5rem;
+}
+
+.projection__topic {
+  font-size: 1.8rem;
+  font-weight: bold;
+  margin: 0.75rem 0 1.25rem;
+  padding: 0.75rem 1rem;
+  background: #fff;
+  border: 2px solid #222;
+}
+
+.projection__topic-label {
+  display: block;
+  font-size: 0.9rem;
+  font-weight: normal;
+  color: #555;
+  margin-bottom: 0.25rem;
+}
+
+.status-grid__topic {
+  font-weight: bold;
+}
+
+.answer-done-form {
+  display: flex;
+  align-items: flex-end;
+  gap: 1rem;
+}
+
+.answer-done-form label {
+  flex: 1;
+  margin-bottom: 0;
+}
+
+.answer-log {
+  margin-top: 1rem;
+  font-size: 0.85rem;
+  color: #555;
+}
+
+.ops-panel {
+  margin-top: 1.5rem;
+  border: 1px dashed #999;
+  padding: 0.75rem 1rem;
+  background: #fafafa;
+}
+
+.ops-panel__section {
+  margin-top: 0.75rem;
+}
+
+.ops-panel__speed-presets {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.ops-panel__speed-presets button {
+  margin: 0;
+}
+
+.ops-panel__reset {
+  background: #c0392b;
+  color: #fff;
+  border: none;
 }

@@ -14,6 +14,20 @@ import type { Env } from "./env.js";
 
 const STORAGE_KEY = "match";
 
+/**
+ * Phase 5より前に保存されたMatchState(storage)にはtopic/qrVisible/speedMultiplier/answerLogが
+ * 存在しない。デシリアライズ直後に既定値で補い、NaN速度などの壊れた状態で復元されるのを防ぐ。
+ */
+function normalizeMatch(match: MatchState): MatchState {
+  return {
+    ...match,
+    topic: match.topic ?? "",
+    qrVisible: match.qrVisible ?? true,
+    speedMultiplier: match.speedMultiplier ?? 1,
+    answerLog: match.answerLog ?? [],
+  };
+}
+
 export class MatchRoom implements DurableObject {
   private state: DurableObjectState;
   private sessions = new Set<WebSocket>();
@@ -32,7 +46,7 @@ export class MatchRoom implements DurableObject {
   private async load(): Promise<void> {
     if (this.loaded) return;
     const stored = await this.state.storage.get<MatchState>(STORAGE_KEY);
-    this.match = stored ?? null;
+    this.match = stored ? normalizeMatch(stored) : null;
     this.loaded = true;
   }
 
@@ -202,7 +216,7 @@ export class MatchRoom implements DurableObject {
   private async handleCreate(request: Request): Promise<Response> {
     const body = (await request.json()) as CreateMatchRequest;
     try {
-      const match = createMatch(body.config, body.red, body.blue);
+      const match = createMatch(body.config, body.red, body.blue, body.topic);
       await this.save(match);
       return this.jsonResponse(match);
     } catch (err) {

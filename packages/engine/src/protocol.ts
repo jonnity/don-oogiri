@@ -9,6 +9,7 @@ export interface CreateMatchRequest {
   config: MatchConfig;
   red: CreateTeamInput;
   blue: CreateTeamInput;
+  topic: string;
 }
 
 export interface CreateMatchResponse {

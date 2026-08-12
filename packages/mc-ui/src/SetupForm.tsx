@@ -10,6 +10,7 @@ const LANE_LENGTH = 100;
 const DEFAULT_EDGE_TO_EDGE_SECONDS = 180;
 
 export function SetupForm({ onCreate, isSubmitting }: SetupFormProps) {
+  const [topic, setTopic] = useState("");
   const [redMembers, setRedMembers] = useState(["", "", ""]);
   const [blueMembers, setBlueMembers] = useState(["", "", ""]);
   const [edgeToEdgeSeconds, setEdgeToEdgeSeconds] = useState(
@@ -18,6 +19,10 @@ export function SetupForm({ onCreate, isSubmitting }: SetupFormProps) {
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault();
+    if (!topic.trim()) {
+      alert("お題を入力してください");
+      return;
+    }
     if (redMembers.some((m) => !m.trim()) || blueMembers.some((m) => !m.trim())) {
       alert("各チーム3人のメンバー名をすべて入力してください");
       return;
@@ -33,12 +38,24 @@ export function SetupForm({ onCreate, isSubmitting }: SetupFormProps) {
       },
       red: { name: "赤", members: redMembers as [string, string, string] },
       blue: { name: "青", members: blueMembers as [string, string, string] },
+      topic: topic.trim(),
     });
   }
 
   return (
     <form onSubmit={handleSubmit} className="setup-form">
       <h2>試合作成</h2>
+      <fieldset>
+        <legend>お題</legend>
+        <label>
+          お題
+          <input
+            value={topic}
+            onChange={(e) => setTopic(e.target.value)}
+            placeholder="例: 意外な二刀流"
+          />
+        </label>
+      </fieldset>
       <TeamFields
         color="red"
         label="🔴 赤"

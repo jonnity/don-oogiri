@@ -5,6 +5,7 @@ import { createMatch } from "./api.js";
 import { ConnectionSettings } from "./ConnectionSettings.js";
 import { MarkerBar } from "./MarkerBar.js";
 import { MatchControls } from "./MatchControls.js";
+import { OpsPanel } from "./OpsPanel.js";
 import { openProjectionWindow } from "./projectionWindow.js";
 import {
   resolveAudienceBaseUrl,
@@ -38,12 +39,15 @@ export function App() {
   }
 
   async function handleCreate(req: CreateMatchRequest) {
-    if (!serverUrl) return;
+    if (!serverUrl || !audienceBaseUrl) return;
     setIsCreating(true);
     setCreateError(null);
     try {
       const res = await createMatch(serverUrl, req);
       setMatchId(res.matchId);
+      // 試合作成のたびに毎回手動で開かせるのは運用上の手間なので、既定で自動的に開く
+      // （プロジェクター出力ウィンドウを閉じてしまった場合の再オープン用に手動ボタンも残す）。
+      void openProjectionWindow({ matchId: res.matchId, serverUrl, audienceBaseUrl });
     } catch (err) {
       setCreateError(err instanceof Error ? err.message : "unknown error");
     } finally {
@@ -95,6 +99,7 @@ export function App() {
             <>
               <MarkerBar state={state} clockOffset={clockOffset} />
               <MatchControls state={state} onSend={sendEvent} />
+              <OpsPanel state={state} onSend={sendEvent} />
             </>
           ) : (
             <p>状態を読み込み中...</p>

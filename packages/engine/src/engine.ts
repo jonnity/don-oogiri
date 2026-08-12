@@ -1,5 +1,6 @@
 import {
   IllegalTransitionError,
+  type AnswerLogEntry,
   type MatchConfig,
   type MatchEvent,
   type MatchState,
@@ -17,9 +18,10 @@ function directionFor(advancingTeam: TeamId): 1 | -1 {
   return advancingTeam === "red" ? 1 : -1;
 }
 
-function advanceSpeed(config: MatchConfig): number {
+/** speedMultiplierはconfig.centerToEdgeMsを変更せずに前進速度を調整するための倍率（ライブ調整・リハーサル早送り用）。 */
+function advanceSpeed(config: MatchConfig, speedMultiplier: number): number {
   // 中央(laneLength/2)から端まで centerToEdgeMs かかる = 距離/時間
-  return config.laneLength / 2 / config.centerToEdgeMs;
+  return (config.laneLength / 2 / config.centerToEdgeMs) * speedMultiplier;
 }
 
 export interface CreateTeamInput {
@@ -31,6 +33,7 @@ export function createMatch(
   config: MatchConfig,
   red: CreateTeamInput,
   blue: CreateTeamInput,
+  topic: string,
 ): MatchState {
   if (config.laneLength <= 0 || config.centerToEdgeMs <= 0) {
     throw new IllegalTransitionError(
@@ -51,6 +54,10 @@ export function createMatch(
     winner: null,
     audienceVotes: { red: 0, blue: 0 },
     votingRoundId: 0,
+    topic,
+    qrVisible: true,
+    speedMultiplier: 1,
+    answerLog: [],
   };
 }
 
@@ -63,7 +70,7 @@ export function getMarkerPosition(state: MatchState, now: number): number {
   if (movement.status === "frozen") {
     return movement.position;
   }
-  const speed = advanceSpeed(config);
+  const speed = advanceSpeed(config, state.speedMultiplier);
   const elapsed = Math.max(0, now - movement.startTime);
   const raw = movement.startPosition + movement.direction * speed * elapsed;
   return clamp(raw, 0, config.laneLength);
@@ -77,7 +84,7 @@ function clamp(value: number, min: number, max: number): number {
 export function nextArrivalTime(state: MatchState): number | null {
   const { movement, config } = state;
   if (movement.status !== "advancing") return null;
-  const speed = advanceSpeed(config);
+  const speed = advanceSpeed(config, state.speedMultiplier);
   const distanceToEdge =
     movement.direction === 1
       ? config.laneLength - movement.startPosition
@@ -131,7 +138,12 @@ function applyStartMatch(state: MatchState): MatchState {
   return { ...state, phase: "initial_writing" };
 }
 
-function applyFirstDone(state: MatchState, team: TeamId, now: number): MatchState {
+function applyFirstDone(
+  state: MatchState,
+  team: TeamId,
+  text: string | undefined,
+  now: number,
+): MatchState {
   if (state.phase !== "initial_writing") {
     throw new IllegalTransitionError(
       `FIRST_DONE is only valid in 'initial_writing', got '${state.phase}'`,
@@ -142,8 +154,24 @@ function applyFirstDone(state: MatchState, team: TeamId, now: number): MatchStat
       "FIRST_DONE was already recorded for this match",
     );
   }
-  const withFlag: MatchState = { ...state, initialFirstDone: true };
+  const withFlag: MatchState = {
+    ...state,
+    initialFirstDone: true,
+    answerLog: appendAnswerLog(state.answerLog, team, text, now),
+  };
   return startAdvancing(withFlag, team, state.config.laneLength / 2, now);
+}
+
+/** 回答テキスト入力（任意機能）。textが空/未入力なら記録しない。 */
+function appendAnswerLog(
+  log: readonly AnswerLogEntry[],
+  team: TeamId,
+  text: string | undefined,
+  recordedAt: number,
+): AnswerLogEntry[] {
+  const trimmed = text?.trim();
+  if (!trimmed) return [...log];
+  return [...log, { team, text: trimmed, recordedAt }];
 }
 
 function applyNominate(state: MatchState, now: number): MatchState {
@@ -161,7 +189,11 @@ function applyNominate(state: MatchState, now: number): MatchState {
   };
 }
 
-function applyAnswerDone(state: MatchState): MatchState {
+function applyAnswerDone(
+  state: MatchState,
+  text: string | undefined,
+  now: number,
+): MatchState {
   const inWritingPhase =
     state.phase === "initial_writing" || state.phase === "challenge_writing";
   if (!inWritingPhase || state.movement.status !== "frozen") {
@@ -169,11 +201,16 @@ function applyAnswerDone(state: MatchState): MatchState {
       `ANSWER_DONE requires a frozen marker (after NOMINATE) in initial_writing/challenge_writing, got phase='${state.phase}' movement='${state.movement.status}'`,
     );
   }
+  // ANSWER_DONE時点でstate.defendingTeamは常にセットされている(NOMINATE可能な時点でstartAdvancing済みのため)。
+  const writer = state.defendingTeam;
   return {
     ...state,
     phase: "voting",
     audienceVotes: { red: 0, blue: 0 },
     votingRoundId: state.votingRoundId + 1,
+    answerLog: writer
+      ? appendAnswerLog(state.answerLog, writer, text, now)
+      : state.answerLog,
   };
 }
 
@@ -271,6 +308,114 @@ function applyVoteResult(
   return { ...reversed, phase: "challenge_writing" };
 }
 
+/** お題の訂正（誤字修正など）。spec通り「1試合1お題固定」なのでゲーム進行上の変更ではなく、あくまで表記の訂正用途。 */
+function applySetTopic(state: MatchState, topic: string): MatchState {
+  const trimmed = topic.trim();
+  if (!trimmed) {
+    throw new IllegalTransitionError("topic must not be empty");
+  }
+  return { ...state, topic: trimmed };
+}
+
+/** 投影画面のQRコード表示切り替え。常時表示ではなくMCが必要なタイミングだけ表示する運用のための操作。 */
+function applySetQrVisible(state: MatchState, visible: boolean): MatchState {
+  return { ...state, qrVisible: visible };
+}
+
+/**
+ * 前進速度のライブ調整・リハーサル早送り用。config.centerToEdgeMsは変更しない。
+ * advancing中に倍率を変えると速度の分母が変わるため、現在位置を基準に startPosition/startTime を
+ * 引き継ぎ直す（そうしないと巻き戻り/急なジャンプが起きる）。frozen/idle中は位置が速度に依存しないため
+ * 倍率を差し替えるだけでよい。
+ */
+function applySetSpeedMultiplier(
+  state: MatchState,
+  multiplier: number,
+  now: number,
+): MatchState {
+  if (!Number.isFinite(multiplier) || multiplier <= 0) {
+    throw new IllegalTransitionError("speed multiplier must be a positive number");
+  }
+  if (state.movement.status !== "advancing") {
+    return { ...state, speedMultiplier: multiplier };
+  }
+  const currentPosition = getMarkerPosition(state, now);
+  const rebased: MatchState = {
+    ...state,
+    speedMultiplier: multiplier,
+    movement: {
+      status: "advancing",
+      startPosition: currentPosition,
+      startTime: now,
+      direction: state.movement.direction,
+    },
+  };
+  return checkArrival(rebased, now);
+}
+
+/**
+ * マーカー位置の手動補正（トラブルリカバリ）。誤操作/回線トラブル等で位置がずれた場合に使う。
+ * idle中は位置が常に中央固定でありそもそも補正の余地がないため対象外。
+ * advancing中の補正で端(0/laneLength)を指定した場合はcheckArrivalによりその場で試合が確定する
+ * （＝MCが「もう到達したとみなす」ための明示的なショートカットとして機能する。意図的な仕様）。
+ */
+function applyCorrectMarkerPosition(
+  state: MatchState,
+  position: number,
+  now: number,
+): MatchState {
+  const correctablePhase =
+    state.phase === "initial_writing" ||
+    state.phase === "challenge_writing" ||
+    state.phase === "voting";
+  if (!correctablePhase || state.movement.status === "idle") {
+    throw new IllegalTransitionError(
+      `CORRECT_MARKER_POSITION requires an active marker (advancing/frozen) in initial_writing/challenge_writing/voting, got phase='${state.phase}' movement='${state.movement.status}'`,
+    );
+  }
+  if (!Number.isFinite(position)) {
+    throw new IllegalTransitionError("position must be a finite number");
+  }
+  const clamped = clamp(position, 0, state.config.laneLength);
+  if (state.movement.status === "frozen") {
+    return { ...state, movement: { status: "frozen", position: clamped } };
+  }
+  const rebased: MatchState = {
+    ...state,
+    movement: {
+      status: "advancing",
+      startPosition: clamped,
+      startTime: now,
+      direction: state.movement.direction,
+    },
+  };
+  return checkArrival(rebased, now);
+}
+
+/**
+ * 試合リセット（トラブルリカバリ）。チーム名/メンバー/お題/パラメータはそのままに、
+ * 進行状態だけをsetup直後の状態へ戻す。メンバー登録のやり直しを避けるための機能。
+ * votingRoundIdはリセットしない: DO側の投票dedup(voterId -> 最後に投票したround)はメモリ上に残るため、
+ * ここを0に戻すと直前のラウンドで投票済みの観客が「まだ投票していない」と誤認識されて二重投票が発生しうる。
+ */
+function applyResetMatch(state: MatchState): MatchState {
+  return {
+    ...state,
+    phase: "setup",
+    teams: {
+      red: { ...state.teams.red, nextRunnerIndex: 0 },
+      blue: { ...state.teams.blue, nextRunnerIndex: 0 },
+    },
+    movement: { status: "idle" },
+    advancingTeam: null,
+    defendingTeam: null,
+    initialFirstDone: false,
+    winner: null,
+    audienceVotes: { red: 0, blue: 0 },
+    answerLog: [],
+  };
+}
+
 /** 状態機械の唯一のエントリポイント。不正な遷移は IllegalTransitionError を投げる。 */
 export function transition(
   state: MatchState,
@@ -287,17 +432,27 @@ export function transition(
     case "START_MATCH":
       return applyStartMatch(current);
     case "FIRST_DONE":
-      return applyFirstDone(current, event.team, now);
+      return applyFirstDone(current, event.team, event.text, now);
     case "NOMINATE":
       return applyNominate(current, now);
     case "ANSWER_DONE":
-      return applyAnswerDone(current);
+      return applyAnswerDone(current, event.text, now);
     case "VOTE_RESULT":
       return applyVoteResult(current, event.redVotes, event.blueVotes, now);
     case "AUDIENCE_VOTE_CAST":
       return applyAudienceVoteCast(current, event.team);
     case "CLOSE_VOTING":
       return applyCloseVoting(current, now);
+    case "SET_TOPIC":
+      return applySetTopic(current, event.topic);
+    case "SET_QR_VISIBLE":
+      return applySetQrVisible(current, event.visible);
+    case "SET_SPEED_MULTIPLIER":
+      return applySetSpeedMultiplier(current, event.multiplier, now);
+    case "CORRECT_MARKER_POSITION":
+      return applyCorrectMarkerPosition(current, event.position, now);
+    case "RESET_MATCH":
+      return applyResetMatch(current);
     default: {
       const _exhaustive: never = event;
       throw new IllegalTransitionError(
