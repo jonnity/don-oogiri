@@ -1,0 +1,59 @@
+name: Build Tauri MC App
+
+on:
+  workflow_dispatch:
+    inputs:
+      server_url:
+        description: "VITE_SERVER_URL (未指定なら空ビルド。起動後に接続設定画面で手入力可能)"
+        required: false
+        type: string
+      audience_url:
+        description: "VITE_AUDIENCE_URL (未指定なら空ビルド。起動後に接続設定画面で手入力可能)"
+        required: false
+        type: string
+  push:
+    tags:
+      - "mc-ui-v*"
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            args: ""
+          - platform: windows-latest
+            args: ""
+
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install dependencies (workspace root)
+        run: pnpm install --frozen-lockfile
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VITE_SERVER_URL: ${{ inputs.server_url }}
+          VITE_AUDIENCE_URL: ${{ inputs.audience_url }}
+        with:
+          projectPath: packages/mc-ui
+          tagName: mc-ui-v__VERSION__
+          releaseName: "don-oogiri MC操作卓 v__VERSION__"
+          releaseDraft: true
+          prerelease: false
+          args: ${{ matrix.args }}

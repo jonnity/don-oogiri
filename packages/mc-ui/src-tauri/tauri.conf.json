@@ -5,7 +5,11 @@
   "identifier": "com.donoogiri.mc",
   "build": {
     "frontendDist": "../dist",
-    "devUrl": "http://localhost:5173"
+    "devUrl": "http://localhost:5173",
+    "beforeBuildCommand": {
+      "script": "pnpm build",
+      "cwd": ".."
+    }
   },
   "app": {
     "windows": [

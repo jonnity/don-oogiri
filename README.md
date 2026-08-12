@@ -1,6 +1,6 @@
-# ドン大喜利 (Phase 1: コアエンジン / Phase 2: 観客投票 / Phase 3: ネイティブアプリ化 / Phase 5: 運用機能)
+# ドン大喜利 (Phase 1: コアエンジン / Phase 2: 観客投票 / Phase 3: ネイティブアプリ化 / Phase 5: 運用機能 / Phase 6: 実戦投入)
 
-`don-oogiri-spec.md` / `GOAL.md` / `GOAL_PHASE3.md` に基づく実装。pnpm workspaceのmonorepo構成。
+`don-oogiri-spec.md` / `GOAL.md` / `GOAL_PHASE3.md` に基づく実装。pnpm workspaceのmonorepo構成。実際にCloudflare/Pages/Tauriへデプロイして会場で動かす手順は [`DEPLOY.md`](./DEPLOY.md) を参照。
 
 ## パッケージ構成
 
@@ -58,7 +58,8 @@ MC操作卓のネイティブウィンドウから「投影画面を開く」ボ
   - **マーカー位置の手動補正（トラブルリカバリ）**: `CORRECT_MARKER_POSITION`イベント。advancing/frozen中のみ有効（idle中は常に中央固定なので対象外）。advancing中に端(0/laneLength)へ補正すると、そのままcheckArrivalにより試合が確定する（MCが「到達とみなす」ための意図的なショートカット）。
   - **試合リセット**: `RESET_MATCH`イベント。チーム名・メンバー・お題・パラメータ・速度倍率・QR表示設定は維持したまま、進行状態（フェーズ・マーカー・投票集計・次走者インデックス）だけをsetup直後に戻す。ただし`votingRoundId`はリセットしない（DO側の観客投票dedupが直前のラウンドを覚えているため、0に戻すと直前投票者が二重投票できてしまう）。
   - **回答テキスト入力（任意機能）**: `FIRST_DONE`/`ANSWER_DONE`イベントに任意の`text`を添えると`MatchState.answerLog`に記録される。MC操作卓に入力欄と履歴表示があるが、口頭発表が基本という運用方針は変えず、入力は完全に任意。
-- 引き続きスコープ外: 投影画面の演出・アニメーション（**Phase4は一旦スキップ**。試作した演出が狙い通りでなかったため保留し、Phase5以降で機能が固まってから最終調整として作り直す）、Mac/Windows実機でのインストーラビルド・配布・署名、認証/D1永続化、DOC統合（Phase6）。
+- **Phase 6（実戦投入 → DOC統合検討）**: `don-oogiri-spec.md` 5章のPhase6項目に着手。具体的なデプロイ手順（Cloudflare Workers/Pages、Tauriのmac/windowsビルド、GitHub Actionsでのクロスビルド）は[`DEPLOY.md`](./DEPLOY.md)にまとめた。DOC統合の要否は本番投入後に評価する（未着手）。
+- 引き続きスコープ外: 投影画面の演出・アニメーション（**Phase4は一旦スキップ**。試作した演出が狙い通りでなかったため保留し、Phase5以降で機能が固まってから最終調整として作り直す）、実際のインストーラ署名・自動更新配信、認証/D1永続化。
 
 ## 懸念点メモ（`don-oogiri-spec.md` 6. リスク・要検討 対応）
 
