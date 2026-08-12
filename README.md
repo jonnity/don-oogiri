@@ -1,6 +1,6 @@
 # ドン大喜利 (Phase 1: コアエンジン / Phase 2: 観客投票 / Phase 3: ネイティブアプリ化 / Phase 5: 運用機能 / Phase 6: 実戦投入)
 
-`don-oogiri-spec.md` / `GOAL.md` / `GOAL_PHASE3.md` に基づく実装。pnpm workspaceのmonorepo構成。実際にCloudflare/Pages/Tauriへデプロイして会場で動かす手順は [`DEPLOY.md`](./DEPLOY.md) を参照。
+`don-oogiri-spec.md` / `GOAL.md` / `GOAL_PHASE3.md` に基づく実装。pnpm workspaceのmonorepo構成。実際にCloudflare/Pages/Tauriへデプロイして会場で動かす手順は [`DEPLOY.md`](./DEPLOY.md)、MCとしてのインストール〜試合進行の使い方は [`USAGE.md`](./USAGE.md) を参照。
 
 ## パッケージ構成
 
