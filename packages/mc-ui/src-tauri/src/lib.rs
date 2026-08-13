@@ -1,4 +1,4 @@
-use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::{webview::PageLoadEvent, Manager, WebviewUrl, WebviewWindowBuilder};
 
 /// 投影画面を別ウィンドウで開く。既に開いていればフォーカスするだけにする
 /// （重複起動でプロジェクター出力が意図せず切り替わるのを防ぐ）。
@@ -14,11 +14,18 @@ fn open_projection_window(app: tauri::AppHandle, query: String) -> Result<(), St
   let window = WebviewWindowBuilder::new(&app, "projection", url)
     .title("ドン大喜利 投影画面")
     .inner_size(1280.0, 720.0)
+    // 診断用: Windowsでの白画面フリーズ調査のため、build()直後ではなく
+    // ナビゲーション開始(Started)のタイミングでDevToolsを開く。build()直後の
+    // open_devtools()はwebviewの初期化が非同期のため間に合わないことがあった。
+    .on_page_load(|window, payload| {
+      if payload.event() == PageLoadEvent::Started {
+        window.open_devtools();
+      }
+    })
     .build()
     .map_err(|e| e.to_string())?;
 
-  // 診断用: Windowsでの白画面フリーズ調査のため、投影画面と一緒にDevToolsを
-  // 自動で開く。原因が特定でき次第、恒久対応に置き換えてこの呼び出しは外す。
+  // 上のon_page_loadが間に合わなかった場合のフォールバック。
   window.open_devtools();
 
   Ok(())
