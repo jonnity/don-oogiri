@@ -84,6 +84,8 @@ Tauriのビルドには各OSのシステム依存関係が必要（[Tauri Prereq
 
 このビルドコマンド自体はLinux向け（`.deb`）で実際に検証済み（本番URLが正しくフロントエンドに焼き込まれた状態でビルド成功を確認）。`tauri.conf.json`の`build.beforeBuildCommand`が`tauri build`実行前にVite側の本番ビルドを自動で走らせる設定になっているため、Mac/Windows上でも同じコマンドで同様に動くはず。
 
+Windowsについては2026-08-13にWindows実機でこのビルドコマンドを実行し、生成された`.msi`/`.exe`インストーラを実際にインストールして「試合作成→投影画面が別ウィンドウで開き、本番サーバのWebSocketに接続して状態が表示される」ところまで動作確認済み（詳細は`README.md`の「懸念点メモ」内、投影画面フリーズ不具合の項を参照）。Mac実機での検証は未実施。
+
 ### オプションC: GitHub Actionsでmac/windows両方のインストーラをビルド（推奨・追加した）
 
 `.github/workflows/tauri-build.yml`を追加した。手元にMac/Windows実機がなくても、GitHub Actionsのホストランナー上でネイティブビルドできる。
