@@ -11,26 +11,21 @@ fn open_projection_window(app: tauri::AppHandle, query: String) -> Result<(), St
   }
 
   let url = WebviewUrl::App(format!("index.html?{query}").into());
-  WebviewWindowBuilder::new(&app, "projection", url)
+  let window = WebviewWindowBuilder::new(&app, "projection", url)
     .title("ドン大喜利 投影画面")
     .inner_size(1280.0, 720.0)
     .build()
     .map_err(|e| e.to_string())?;
+
+  // 診断用: Windowsでの白画面フリーズ調査のため、投影画面と一緒にDevToolsを
+  // 自動で開く。原因が特定でき次第、恒久対応に置き換えてこの呼び出しは外す。
+  window.open_devtools();
 
   Ok(())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-  // 診断用: WebView2のリモートデバッグを有効化する。投影画面が固まった状態でも
-  // 同じPC上の別のEdge/Chromeで http://localhost:9222 を開けば中身を検証できる。
-  // 原因が特定でき次第、恒久対応に置き換えてこのオプションは外す。
-  #[cfg(target_os = "windows")]
-  std::env::set_var(
-    "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
-    "--remote-debugging-port=9222",
-  );
-
   tauri::Builder::default()
     .invoke_handler(tauri::generate_handler![open_projection_window])
     .setup(|app| {
