@@ -43,7 +43,38 @@ describe("createMatch", () => {
     expect(match.topic).toBe("テストのお題");
     expect(match.qrVisible).toBe(true);
     expect(match.speedMultiplier).toBe(1);
-    expect(match.answerLog).toEqual([]);
+  });
+
+  it("accepts team sizes from 1 (タイマン) to 3", () => {
+    for (const size of [1, 2, 3]) {
+      const members = Array.from({ length: size }, (_, i) => `member${i}`);
+      const match = createMatch(
+        CONFIG,
+        { name: "赤", members },
+        { name: "青", members },
+        "お題",
+      );
+      expect(match.teams.red.members).toHaveLength(size);
+    }
+  });
+
+  it("rejects team sizes outside 1-3", () => {
+    expect(() =>
+      createMatch(
+        CONFIG,
+        { name: "赤", members: [] },
+        { name: "青", members: ["a"] },
+        "お題",
+      ),
+    ).toThrow(IllegalTransitionError);
+    expect(() =>
+      createMatch(
+        CONFIG,
+        { name: "赤", members: ["a", "b", "c", "d"] },
+        { name: "青", members: ["a"] },
+        "お題",
+      ),
+    ).toThrow(IllegalTransitionError);
   });
 });
 
@@ -144,6 +175,16 @@ describe("VOTE_RESULT — advancing side wins (including ties)", () => {
     match = transition(match, { type: "VOTE_RESULT", redVotes: 5, blueVotes: 1 }, 13_000);
     expect(match.teams.blue.nextRunnerIndex).toBe(1);
     expect(match.teams.red.nextRunnerIndex).toBe(0);
+  });
+
+  it("on a tie, rotates BOTH teams' next runner (defense success, fresh matchup)", () => {
+    let match = toVoting("red");
+    expect(match.teams.red.nextRunnerIndex).toBe(0);
+    expect(match.teams.blue.nextRunnerIndex).toBe(0);
+    match = transition(match, { type: "VOTE_RESULT", redVotes: 4, blueVotes: 4 }, 13_000);
+    expect(match.advancingTeam).toBe("red");
+    expect(match.teams.blue.nextRunnerIndex).toBe(1);
+    expect(match.teams.red.nextRunnerIndex).toBe(1);
   });
 });
 
@@ -291,6 +332,37 @@ describe("audience voting", () => {
     expect(match.audienceVotes).toEqual({ red: 2, blue: 1 });
   });
 
+  it("allows a voter to change their vote within the same round via previousTeam", () => {
+    let match = toVoting("red");
+    match = transition(
+      match,
+      { type: "AUDIENCE_VOTE_CAST", team: "red" },
+      13_000,
+    );
+    expect(match.audienceVotes).toEqual({ red: 1, blue: 0 });
+    match = transition(
+      match,
+      { type: "AUDIENCE_VOTE_CAST", team: "blue", previousTeam: "red" },
+      13_100,
+    );
+    expect(match.audienceVotes).toEqual({ red: 0, blue: 1 });
+  });
+
+  it("re-casting the same team via previousTeam is a no-op (no double counting)", () => {
+    let match = toVoting("red");
+    match = transition(
+      match,
+      { type: "AUDIENCE_VOTE_CAST", team: "red" },
+      13_000,
+    );
+    match = transition(
+      match,
+      { type: "AUDIENCE_VOTE_CAST", team: "red", previousTeam: "red" },
+      13_100,
+    );
+    expect(match.audienceVotes).toEqual({ red: 1, blue: 0 });
+  });
+
   it("CLOSE_VOTING resolves using the current tally like a manual VOTE_RESULT (reversal case)", () => {
     let match = toVoting("red");
     match = transition(match, { type: "AUDIENCE_VOTE_CAST", team: "red" }, 13_000);
@@ -319,33 +391,6 @@ describe("audience voting", () => {
     match = transition(match, { type: "ANSWER_DONE" }, 15_000);
     expect(match.votingRoundId).toBe(2);
     expect(match.audienceVotes).toEqual({ red: 0, blue: 0 });
-  });
-});
-
-describe("answer text log (optional feature)", () => {
-  it("records FIRST_DONE and ANSWER_DONE text when provided", () => {
-    let match = newMatch();
-    match = transition(match, { type: "START_MATCH" }, 0);
-    match = transition(
-      match,
-      { type: "FIRST_DONE", team: "red", text: "赤の一発目" },
-      0,
-    );
-    match = transition(match, { type: "NOMINATE" }, 9_000);
-    match = transition(match, { type: "ANSWER_DONE", text: "青の返し" }, 10_000);
-    expect(match.answerLog).toEqual([
-      { team: "red", text: "赤の一発目", recordedAt: 0 },
-      { team: "blue", text: "青の返し", recordedAt: 10_000 },
-    ]);
-  });
-
-  it("does not record an entry when text is omitted or blank", () => {
-    let match = newMatch();
-    match = transition(match, { type: "START_MATCH" }, 0);
-    match = transition(match, { type: "FIRST_DONE", team: "red" }, 0);
-    match = transition(match, { type: "NOMINATE" }, 9_000);
-    match = transition(match, { type: "ANSWER_DONE", text: "   " }, 10_000);
-    expect(match.answerLog).toEqual([]);
   });
 });
 
@@ -486,7 +531,6 @@ describe("RESET_MATCH", () => {
     // votingRoundIdはリセットしない: DO側の投票dedupが直前のラウンドを覚えているため、
     // 0に戻すと直前ラウンドの投票者が二重投票できてしまう。
     expect(match.votingRoundId).toBe(roundIdBeforeReset);
-    expect(match.answerLog).toEqual([]);
   });
 
   it("allows a fresh START_MATCH after reset", () => {

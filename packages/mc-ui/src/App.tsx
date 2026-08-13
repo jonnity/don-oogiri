@@ -8,10 +8,13 @@ import { MatchControls } from "./MatchControls.js";
 import { OpsPanel } from "./OpsPanel.js";
 import { openProjectionWindow } from "./projectionWindow.js";
 import {
+  clearStoredMatchId,
   resolveAudienceBaseUrl,
+  resolveMatchId,
   resolveServerUrl,
   setAudienceBaseUrl,
   setServerUrl,
+  setStoredMatchId,
 } from "./settings.js";
 import { SetupForm } from "./SetupForm.js";
 import { useMatchSocket } from "./useMatchSocket.js";
@@ -22,7 +25,7 @@ export function App() {
     resolveAudienceBaseUrl(),
   );
   const [showSettings, setShowSettings] = useState(false);
-  const [matchId, setMatchId] = useState<string | null>(null);
+  const [matchId, setMatchId] = useState<string | null>(() => resolveMatchId());
   const [isCreating, setIsCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const { state, clockOffset, status, lastError, sendEvent } = useMatchSocket(
@@ -45,6 +48,7 @@ export function App() {
     try {
       const res = await createMatch(serverUrl, req);
       setMatchId(res.matchId);
+      setStoredMatchId(res.matchId);
       // 試合作成のたびに毎回手動で開かせるのは運用上の手間なので、既定で自動的に開く
       // （プロジェクター出力ウィンドウを閉じてしまった場合の再オープン用に手動ボタンも残す）。
       void openProjectionWindow({ matchId: res.matchId, serverUrl, audienceBaseUrl });
@@ -58,6 +62,12 @@ export function App() {
   function handleOpenProjection() {
     if (!serverUrl || !audienceBaseUrl || !matchId) return;
     void openProjectionWindow({ matchId, serverUrl, audienceBaseUrl });
+  }
+
+  /** 明示的な新規試合作成。ここでだけセッション(matchId)を手放し、新しいQRコードに切り替える。 */
+  function handleStartNewMatch() {
+    clearStoredMatchId();
+    setMatchId(null);
   }
 
   if (!serverUrl || !audienceBaseUrl || showSettings) {
@@ -90,7 +100,7 @@ export function App() {
         <>
           <p className="connection-status">
             接続: {status} / matchId: {matchId}{" "}
-            <button onClick={() => setMatchId(null)}>新しい試合を作る</button>{" "}
+            <button onClick={handleStartNewMatch}>新しい試合を作る</button>{" "}
             <button onClick={handleOpenProjection}>投影画面を開く</button>
           </p>
           {lastError && <p className="error">サーバーエラー: {lastError}</p>}

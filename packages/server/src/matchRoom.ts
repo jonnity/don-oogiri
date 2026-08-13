@@ -15,7 +15,7 @@ import type { Env } from "./env.js";
 const STORAGE_KEY = "match";
 
 /**
- * Phase 5より前に保存されたMatchState(storage)にはtopic/qrVisible/speedMultiplier/answerLogが
+ * Phase 5より前に保存されたMatchState(storage)にはtopic/qrVisible/speedMultiplierが
  * 存在しない。デシリアライズ直後に既定値で補い、NaN速度などの壊れた状態で復元されるのを防ぐ。
  */
 function normalizeMatch(match: MatchState): MatchState {
@@ -24,7 +24,6 @@ function normalizeMatch(match: MatchState): MatchState {
     topic: match.topic ?? "",
     qrVisible: match.qrVisible ?? true,
     speedMultiplier: match.speedMultiplier ?? 1,
-    answerLog: match.answerLog ?? [],
   };
 }
 
@@ -33,9 +32,9 @@ export class MatchRoom implements DurableObject {
   private sessions = new Set<WebSocket>();
   /** 観客の投票dedup用。voterIdはURLクエリ(?voterId=)でWebSocket接続ごとに紐づける。 */
   private voterIds = new Map<WebSocket, string>();
-  /** voterId -> 最後に投票したvotingRoundId。1端末1票(ラウンドごと)の判定に使う。DO再起動でリセットされるが、
-   * イベント用途の緩い不正対策として許容する(spec: 不正対策はゆるくてよい)。 */
-  private votedRoundByVoter = new Map<string, number>();
+  /** voterId -> このラウンドで最後に投票したチーム。同一ラウンド内の再選択（票の変更）を検知するために使う。
+   * DO再起動でリセットされるが、イベント用途の緩い不正対策として許容する(spec: 不正対策はゆるくてよい)。 */
+  private votedTeamByVoter = new Map<string, { round: number; team: TeamId }>();
   private match: MatchState | null = null;
   private loaded = false;
 
@@ -170,7 +169,10 @@ export class MatchRoom implements DurableObject {
     }
   }
 
-  /** 観客の1票。voterId必須・1端末1票(votingRoundIdごと)をここでチェックしてからengineへ委譲する。 */
+  /**
+   * 観客の1票。voterId必須。同一ラウンド内であれば票の変更（再選択）を許容し、
+   * 旧選択を取り消して新選択に付け替える。
+   */
   private async handleAudienceVoteCast(ws: WebSocket, team: TeamId): Promise<void> {
     if (!this.match) return;
     const voterId = this.voterIds.get(ws);
@@ -178,19 +180,18 @@ export class MatchRoom implements DurableObject {
       this.sendVoteAck(ws, false, "voterId is required to vote");
       return;
     }
-    if (this.votedRoundByVoter.get(voterId) === this.match.votingRoundId) {
-      this.sendVoteAck(ws, false, "already voted this round");
-      return;
-    }
+    const previous = this.votedTeamByVoter.get(voterId);
+    const previousTeam =
+      previous && previous.round === this.match.votingRoundId ? previous.team : undefined;
     try {
       const next = transition(
         this.match,
-        { type: "AUDIENCE_VOTE_CAST", team },
+        { type: "AUDIENCE_VOTE_CAST", team, previousTeam },
         Date.now(),
       );
       await this.save(next);
       // dedup記録はtransition成功後に行う。失敗時に投票権を失わせないため。
-      this.votedRoundByVoter.set(voterId, next.votingRoundId);
+      this.votedTeamByVoter.set(voterId, { round: next.votingRoundId, team });
       this.sendVoteAck(ws, true);
     } catch (err) {
       this.sendVoteAck(

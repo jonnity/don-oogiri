@@ -93,6 +93,49 @@ h1 {
   filter: brightness(0.85);
 }
 
+.vote-buttons button.is-selected {
+  box-shadow: 0 0 0 4px #f1c40f inset;
+}
+
+.voting-section {
+  margin-top: 1.5rem;
+}
+
+.confirm-vote {
+  width: 100%;
+  padding: 0.9rem 0.5rem;
+  margin-top: 1rem;
+  font-size: 1.1rem;
+  font-weight: bold;
+  border: none;
+  border-radius: 12px;
+  background: #27ae60;
+  color: white;
+  cursor: pointer;
+}
+
+.confirm-vote:disabled {
+  background: #aaa;
+  cursor: not-allowed;
+}
+
+.voted-status {
+  font-size: 1.1rem;
+  font-weight: bold;
+}
+
+.change-vote {
+  width: 100%;
+  padding: 0.6rem 0.5rem;
+  margin-top: 0.5rem;
+  font-size: 0.95rem;
+  border: 1px solid #999;
+  border-radius: 8px;
+  background: white;
+  color: #333;
+  cursor: pointer;
+}
+
 .winner-banner {
   font-size: 1.4rem;
   font-weight: bold;

@@ -5,11 +5,11 @@
 
 export type TeamId = "red" | "blue";
 
-/** 各チームは3人固定。members[nextRunnerIndex] が次に執筆すべき人。 */
+/** 各チームは1〜3人（タイマン〜3人チーム）。members[nextRunnerIndex] が次に執筆すべき人。 */
 export interface TeamRoster {
   name: string;
-  members: readonly [string, string, string];
-  nextRunnerIndex: 0 | 1 | 2;
+  members: readonly string[];
+  nextRunnerIndex: number;
 }
 
 export interface MatchConfig {
@@ -37,13 +37,6 @@ export type Phase =
   | "challenge_writing"
   | "finished";
 
-/** 回答テキスト入力（任意機能）。MCが入力した場合のみ記録される。 */
-export interface AnswerLogEntry {
-  team: TeamId;
-  text: string;
-  recordedAt: number;
-}
-
 export interface MatchState {
   phase: Phase;
   config: MatchConfig;
@@ -66,17 +59,16 @@ export interface MatchState {
   qrVisible: boolean;
   /** 前進速度の倍率（デフォルト1）。config.centerToEdgeMsは変えずに、ライブ調整・リハーサル早送りに使う。 */
   speedMultiplier: number;
-  /** 回答テキストの履歴（任意機能）。MCが入力した回答のみ記録される。 */
-  answerLog: AnswerLogEntry[];
 }
 
 export type MatchEvent =
   | { type: "START_MATCH" }
-  | { type: "FIRST_DONE"; team: TeamId; text?: string }
+  | { type: "FIRST_DONE"; team: TeamId }
   | { type: "NOMINATE" }
-  | { type: "ANSWER_DONE"; text?: string }
+  | { type: "ANSWER_DONE" }
   | { type: "VOTE_RESULT"; redVotes: number; blueVotes: number }
-  | { type: "AUDIENCE_VOTE_CAST"; team: TeamId }
+  /** previousTeamは同一投票ラウンド内で票を変更する場合に指定する（旧選択を取り消して新選択に付け替える）。 */
+  | { type: "AUDIENCE_VOTE_CAST"; team: TeamId; previousTeam?: TeamId }
   | { type: "CLOSE_VOTING" }
   | { type: "SET_TOPIC"; topic: string }
   | { type: "SET_QR_VISIBLE"; visible: boolean }

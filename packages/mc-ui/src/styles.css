@@ -36,6 +36,24 @@ button {
   cursor: pointer;
 }
 
+.team-size-picker {
+  display: flex;
+  gap: 1rem;
+}
+
+.team-size-picker__option {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  width: auto;
+  margin-bottom: 0;
+}
+
+.team-size-picker__option input {
+  display: inline-block;
+  width: auto;
+}
+
 .team-fields--red {
   border-color: #c0392b;
 }
@@ -224,23 +242,6 @@ button {
 
 .status-grid__topic {
   font-weight: bold;
-}
-
-.answer-done-form {
-  display: flex;
-  align-items: flex-end;
-  gap: 1rem;
-}
-
-.answer-done-form label {
-  flex: 1;
-  margin-bottom: 0;
-}
-
-.answer-log {
-  margin-top: 1rem;
-  font-size: 0.85rem;
-  color: #555;
 }
 
 .ops-panel {

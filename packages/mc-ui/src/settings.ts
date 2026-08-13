@@ -1,5 +1,6 @@
 const SERVER_URL_KEY = "donOogiri.serverUrl";
 const AUDIENCE_BASE_URL_KEY = "donOogiri.audienceBaseUrl";
+const MATCH_ID_KEY = "donOogiri.matchId";
 const DEFAULT_SERVER_PORT = "8787";
 const DEFAULT_AUDIENCE_PORT = "5174";
 
@@ -25,6 +26,14 @@ function writeStored(key: string, value: string): void {
     window.localStorage.setItem(key, value);
   } catch {
     // localStorageが使えない環境では保存できないが、そのランでは毎回設定入力を求めればよいので致命的ではない
+  }
+}
+
+function removeStored(key: string): void {
+  try {
+    window.localStorage.removeItem(key);
+  } catch {
+    // 読み書きできない環境ではそもそも保存されていないので無視してよい
   }
 }
 
@@ -57,4 +66,20 @@ export function resolveAudienceBaseUrl(): string | null {
 
 export function setAudienceBaseUrl(url: string): void {
   writeStored(AUDIENCE_BASE_URL_KEY, url);
+}
+
+/**
+ * 進行中の試合セッション（matchId）。作成のたびに新しいQRコードを配って回るのは
+ * 運用上不便なので、MCが明示的に「新しい試合を作る」を選ぶまでは同一クライアントで使い回す。
+ */
+export function resolveMatchId(): string | null {
+  return readStored(MATCH_ID_KEY);
+}
+
+export function setStoredMatchId(matchId: string): void {
+  writeStored(MATCH_ID_KEY, matchId);
+}
+
+export function clearStoredMatchId(): void {
+  removeStored(MATCH_ID_KEY);
 }

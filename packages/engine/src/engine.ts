@@ -1,11 +1,14 @@
 import {
   IllegalTransitionError,
-  type AnswerLogEntry,
   type MatchConfig,
   type MatchEvent,
   type MatchState,
   type TeamId,
+  type TeamRoster,
 } from "./types.js";
+
+const MIN_TEAM_SIZE = 1;
+const MAX_TEAM_SIZE = 3;
 
 const OTHER_TEAM: Record<TeamId, TeamId> = { red: "blue", blue: "red" };
 
@@ -26,7 +29,8 @@ function advanceSpeed(config: MatchConfig, speedMultiplier: number): number {
 
 export interface CreateTeamInput {
   name: string;
-  members: readonly [string, string, string];
+  /** 1〜3人（タイマン〜3人チーム）。 */
+  members: readonly string[];
 }
 
 export function createMatch(
@@ -39,6 +43,13 @@ export function createMatch(
     throw new IllegalTransitionError(
       "laneLength and centerToEdgeMs must be positive",
     );
+  }
+  for (const team of [red, blue]) {
+    if (team.members.length < MIN_TEAM_SIZE || team.members.length > MAX_TEAM_SIZE) {
+      throw new IllegalTransitionError(
+        `team members must be between ${MIN_TEAM_SIZE} and ${MAX_TEAM_SIZE}, got ${team.members.length}`,
+      );
+    }
   }
   return {
     phase: "setup",
@@ -57,7 +68,6 @@ export function createMatch(
     topic,
     qrVisible: true,
     speedMultiplier: 1,
-    answerLog: [],
   };
 }
 
@@ -141,7 +151,6 @@ function applyStartMatch(state: MatchState): MatchState {
 function applyFirstDone(
   state: MatchState,
   team: TeamId,
-  text: string | undefined,
   now: number,
 ): MatchState {
   if (state.phase !== "initial_writing") {
@@ -154,24 +163,8 @@ function applyFirstDone(
       "FIRST_DONE was already recorded for this match",
     );
   }
-  const withFlag: MatchState = {
-    ...state,
-    initialFirstDone: true,
-    answerLog: appendAnswerLog(state.answerLog, team, text, now),
-  };
+  const withFlag: MatchState = { ...state, initialFirstDone: true };
   return startAdvancing(withFlag, team, state.config.laneLength / 2, now);
-}
-
-/** 回答テキスト入力（任意機能）。textが空/未入力なら記録しない。 */
-function appendAnswerLog(
-  log: readonly AnswerLogEntry[],
-  team: TeamId,
-  text: string | undefined,
-  recordedAt: number,
-): AnswerLogEntry[] {
-  const trimmed = text?.trim();
-  if (!trimmed) return [...log];
-  return [...log, { team, text: trimmed, recordedAt }];
 }
 
 function applyNominate(state: MatchState, now: number): MatchState {
@@ -189,11 +182,7 @@ function applyNominate(state: MatchState, now: number): MatchState {
   };
 }
 
-function applyAnswerDone(
-  state: MatchState,
-  text: string | undefined,
-  now: number,
-): MatchState {
+function applyAnswerDone(state: MatchState): MatchState {
   const inWritingPhase =
     state.phase === "initial_writing" || state.phase === "challenge_writing";
   if (!inWritingPhase || state.movement.status !== "frozen") {
@@ -201,30 +190,40 @@ function applyAnswerDone(
       `ANSWER_DONE requires a frozen marker (after NOMINATE) in initial_writing/challenge_writing, got phase='${state.phase}' movement='${state.movement.status}'`,
     );
   }
-  // ANSWER_DONE時点でstate.defendingTeamは常にセットされている(NOMINATE可能な時点でstartAdvancing済みのため)。
-  const writer = state.defendingTeam;
   return {
     ...state,
     phase: "voting",
     audienceVotes: { red: 0, blue: 0 },
     votingRoundId: state.votingRoundId + 1,
-    answerLog: writer
-      ? appendAnswerLog(state.answerLog, writer, text, now)
-      : state.answerLog,
   };
 }
 
-function applyAudienceVoteCast(state: MatchState, team: TeamId): MatchState {
+/**
+ * previousTeamが指定された場合（同一投票ラウンド内での再選択）は、旧選択を取り消してから新選択を加える。
+ * previousTeamとteamが同じ場合は変更なしのため何もしない。
+ */
+function applyAudienceVoteCast(
+  state: MatchState,
+  team: TeamId,
+  previousTeam: TeamId | undefined,
+): MatchState {
   if (state.phase !== "voting") {
     throw new IllegalTransitionError(
       `AUDIENCE_VOTE_CAST is only valid in 'voting', got '${state.phase}'`,
     );
   }
+  if (previousTeam === team) return state;
+  const withoutPrevious = previousTeam
+    ? {
+        ...state.audienceVotes,
+        [previousTeam]: Math.max(0, state.audienceVotes[previousTeam] - 1),
+      }
+    : state.audienceVotes;
   return {
     ...state,
     audienceVotes: {
-      ...state.audienceVotes,
-      [team]: state.audienceVotes[team] + 1,
+      ...withoutPrevious,
+      [team]: withoutPrevious[team] + 1,
     },
   };
 }
@@ -245,7 +244,7 @@ function applyCloseVoting(state: MatchState, now: number): MatchState {
 
 function incrementRunner(state: MatchState, team: TeamId): MatchState {
   const roster = state.teams[team];
-  const nextRunnerIndex = ((roster.nextRunnerIndex + 1) % 3) as 0 | 1 | 2;
+  const nextRunnerIndex = (roster.nextRunnerIndex + 1) % roster.members.length;
   return {
     ...state,
     teams: {
@@ -280,6 +279,7 @@ function applyVoteResult(
   const defendingVotes = defendingTeam === "red" ? redVotes : blueVotes;
   // 同数票は進んでる側の勝ち（阻止する側は上回る必要がある）
   const defendingWins = defendingVotes > advancingVotes;
+  const isTie = advancingVotes === defendingVotes;
   const frozenPosition =
     state.movement.status === "frozen"
       ? state.movement.position
@@ -287,9 +287,14 @@ function applyVoteResult(
 
   if (!defendingWins) {
     // 進んでる側の勝ち: そのままchallenge_writing継続。負けた阻止側の次走者が執筆。
-    const withNextRunner = incrementRunner(state, defendingTeam);
+    // 同数票の場合は「防衛成功」として、同じ顔合わせが続かないよう進んでる側の次走者も交代させる
+    // （進んでる側の回答自体は変わらず、答えるべき次の人が繰り上がるだけ）。
+    const withDefenderRotated = incrementRunner(state, defendingTeam);
+    const withRunnersRotated = isTie
+      ? incrementRunner(withDefenderRotated, advancingTeam)
+      : withDefenderRotated;
     const resumed = startAdvancing(
-      withNextRunner,
+      withRunnersRotated,
       advancingTeam,
       frozenPosition,
       now,
@@ -412,7 +417,6 @@ function applyResetMatch(state: MatchState): MatchState {
     initialFirstDone: false,
     winner: null,
     audienceVotes: { red: 0, blue: 0 },
-    answerLog: [],
   };
 }
 
@@ -432,15 +436,15 @@ export function transition(
     case "START_MATCH":
       return applyStartMatch(current);
     case "FIRST_DONE":
-      return applyFirstDone(current, event.team, event.text, now);
+      return applyFirstDone(current, event.team, now);
     case "NOMINATE":
       return applyNominate(current, now);
     case "ANSWER_DONE":
-      return applyAnswerDone(current, event.text, now);
+      return applyAnswerDone(current);
     case "VOTE_RESULT":
       return applyVoteResult(current, event.redVotes, event.blueVotes, now);
     case "AUDIENCE_VOTE_CAST":
-      return applyAudienceVoteCast(current, event.team);
+      return applyAudienceVoteCast(current, event.team, event.previousTeam);
     case "CLOSE_VOTING":
       return applyCloseVoting(current, now);
     case "SET_TOPIC":
@@ -462,6 +466,20 @@ export function transition(
   }
 }
 
+/**
+ * 現在のnextRunnerIndexが指す走者名。nextRunnerIndexはincrementRunnerで常に
+ * members.lengthの範囲内に保たれるため、未定義になることはない。
+ */
+function currentRunnerName(roster: TeamRoster): string {
+  const name = roster.members[roster.nextRunnerIndex];
+  if (name === undefined) {
+    throw new IllegalTransitionError(
+      `nextRunnerIndex ${roster.nextRunnerIndex} is out of range for ${roster.members.length} members`,
+    );
+  }
+  return name;
+}
+
 /** 次に執筆すべき人（表示用）。該当者がいなければnull。 */
 export function currentWriter(
   state: MatchState,
@@ -471,13 +489,13 @@ export function currentWriter(
     const defending = state.defendingTeam;
     if (!defending) return null;
     const roster = state.teams[defending];
-    return { team: defending, name: roster.members[roster.nextRunnerIndex] };
+    return { team: defending, name: currentRunnerName(roster) };
   }
   if (state.phase === "challenge_writing") {
     const defending = state.defendingTeam;
     if (!defending) return null;
     const roster = state.teams[defending];
-    return { team: defending, name: roster.members[roster.nextRunnerIndex] };
+    return { team: defending, name: currentRunnerName(roster) };
   }
   return null;
 }
