@@ -22,11 +22,14 @@ fn open_projection_window(app: tauri::AppHandle, query: String) -> Result<(), St
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-  // WindowsのWebView2は複数ウィンドウ利用時にGPU合成(DirectComposition)が壊れ、
-  // 2枚目以降のウィンドウ（投影画面）が黒画面になる既知の不具合がある。
-  // 最初のwebview生成前にGPUアクセラレーションを無効化して回避する。
+  // 診断用: WebView2のリモートデバッグを有効化する。投影画面が固まった状態でも
+  // 同じPC上の別のEdge/Chromeで http://localhost:9222 を開けば中身を検証できる。
+  // 原因が特定でき次第、恒久対応に置き換えてこのオプションは外す。
   #[cfg(target_os = "windows")]
-  std::env::set_var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", "--disable-gpu");
+  std::env::set_var(
+    "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
+    "--remote-debugging-port=9222",
+  );
 
   tauri::Builder::default()
     .invoke_handler(tauri::generate_handler![open_projection_window])
