@@ -21,6 +21,7 @@ export function MatchControls({ state, onSend }: MatchControlsProps) {
   return (
     <div className="match-controls">
       <h2>状態</h2>
+      <WritingStatusBanner state={state} writers={writers} />
       <dl className="status-grid">
         <dt>お題</dt>
         <dd className="status-grid__topic">{state.topic}</dd>
@@ -34,12 +35,6 @@ export function MatchControls({ state, onSend }: MatchControlsProps) {
         <dd>
           {state.currentAnswerer.red ?? "-"} / {state.currentAnswerer.blue ?? "-"}
         </dd>
-        <dt>次の回答者</dt>
-        <dd>
-          {writers.length > 0
-            ? writers.map((w) => `${teamLabel(state, w.team)} / ${w.name}`).join("、")
-            : "-"}
-        </dd>
         <dt>マーカー状態</dt>
         <dd>{state.movement.status}</dd>
       </dl>
@@ -52,6 +47,35 @@ export function MatchControls({ state, onSend }: MatchControlsProps) {
         </p>
       )}
     </div>
+  );
+}
+
+/**
+ * 「今どちらのチームが回答を書くべきか」を一目でわかるようにするための強調表示。
+ * currentWriters()が返す0〜2件をそのままチーム色でバッジ化する。
+ */
+function WritingStatusBanner({
+  state,
+  writers,
+}: {
+  state: MatchState;
+  writers: { team: TeamId; name: string }[];
+}) {
+  if (writers.length === 0) return null;
+
+  return (
+    <p className="writing-status">
+      {writers.length === 2 ? (
+        <span className="writing-status__label">両チームが回答を書いています：</span>
+      ) : (
+        <span className="writing-status__label">回答を書いているのは：</span>
+      )}
+      {writers.map((w) => (
+        <span key={w.team} className={`writing-status__badge writing-status__badge--${w.team}`}>
+          {teamLabel(state, w.team)} / {w.name}
+        </span>
+      ))}
+    </p>
   );
 }
 
@@ -79,13 +103,10 @@ function renderActions(state: MatchState, onSend: (event: MatchEvent) => void) {
     );
   }
 
-  if (inBothWritingPhase || state.phase === "challenge_writing") {
-    if (state.movement.status === "advancing") {
-      return <button onClick={() => onSend({ type: "NOMINATE" })}>指名（前進ストップ）</button>;
-    }
-    if (state.movement.status === "frozen") {
-      return <button onClick={() => onSend({ type: "ANSWER_DONE" })}>回答完了 → 投票へ</button>;
-    }
+  if ((inBothWritingPhase || state.phase === "challenge_writing") && state.movement.status === "advancing") {
+    return (
+      <button onClick={() => onSend({ type: "NOMINATE" })}>指名（前進ストップ→投票開始）</button>
+    );
   }
 
   if (state.phase === "voting") {

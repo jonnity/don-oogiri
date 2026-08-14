@@ -55,7 +55,7 @@ export interface MatchState {
   winner: TeamId | null;
   /**
    * 「今の回答者」＝各チームの現在アクティブな回答（進んでる側の現チャンピオン回答、または
-   * 阻止する側の直近の挑戦回答）を書いたメンバー名。FIRST_DONE/ANSWER_DONEで更新される。
+   * 阻止する側の直近の挑戦回答）を書いたメンバー名。FIRST_DONE/NOMINATEで更新される。
    * まだ誰も書き終えていなければnull。
    */
   currentAnswerer: Record<TeamId, string | null>;
@@ -74,8 +74,11 @@ export interface MatchState {
 export type MatchEvent =
   | { type: "START_MATCH" }
   | { type: "FIRST_DONE"; team: TeamId }
+  /**
+   * 阻止する側の前進停止と投票開始を1アクションで行う。回答完了とnominateの間に
+   * 挟むワンクッションは運用上不要と判断し、ANSWER_DONEと統合した（旧仕様は分離していた）。
+   */
   | { type: "NOMINATE" }
-  | { type: "ANSWER_DONE" }
   | { type: "VOTE_RESULT"; redVotes: number; blueVotes: number }
   /** previousTeamは同一投票ラウンド内で票を変更する場合に指定する（旧選択を取り消して新選択に付け替える）。 */
   | { type: "AUDIENCE_VOTE_CAST"; team: TeamId; previousTeam?: TeamId }

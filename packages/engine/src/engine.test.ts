@@ -106,43 +106,27 @@ describe("initial_writing", () => {
     );
   });
 
-  it("NOMINATE freezes the marker at its current interpolated position", () => {
+  it("NOMINATE freezes the marker at its current interpolated position and opens voting immediately", () => {
     let match = newMatch();
     match = transition(match, { type: "START_MATCH" }, 0);
     match = transition(match, { type: "FIRST_DONE", team: "red" }, 0);
     // speed = 50 / 90000 per ms. after 9000ms -> +5
     match = transition(match, { type: "NOMINATE" }, 9_000);
     expect(match.movement).toEqual({ status: "frozen", position: 55 });
+    // 前進停止と投票開始はワンクッションなく同一アクション(NOMINATE)で起きる
+    expect(match.phase).toBe("voting");
+    expect(match.votingRoundId).toBe(1);
 
     // 凍結後は時間が進んでも位置は変わらない
     expect(getMarkerPosition(match, 999_999)).toBe(55);
   });
-
-  it("ANSWER_DONE after NOMINATE moves to voting", () => {
-    let match = newMatch();
-    match = transition(match, { type: "START_MATCH" }, 0);
-    match = transition(match, { type: "FIRST_DONE", team: "red" }, 0);
-    match = transition(match, { type: "NOMINATE" }, 9_000);
-    match = transition(match, { type: "ANSWER_DONE" }, 12_000);
-    expect(match.phase).toBe("voting");
-  });
-
-  it("rejects ANSWER_DONE without a prior NOMINATE", () => {
-    let match = newMatch();
-    match = transition(match, { type: "START_MATCH" }, 0);
-    match = transition(match, { type: "FIRST_DONE", team: "red" }, 0);
-    expect(() => transition(match, { type: "ANSWER_DONE" }, 1_000)).toThrow(
-      IllegalTransitionError,
-    );
-  });
 });
 
-function toVoting(advancingFirst: "red" | "blue", nominateAt = 9_000, answerAt = 12_000): MatchState {
+function toVoting(advancingFirst: "red" | "blue", nominateAt = 9_000): MatchState {
   let match = newMatch();
   match = transition(match, { type: "START_MATCH" }, 0);
   match = transition(match, { type: "FIRST_DONE", team: advancingFirst }, 0);
   match = transition(match, { type: "NOMINATE" }, nominateAt);
-  match = transition(match, { type: "ANSWER_DONE" }, answerAt);
   return match;
 }
 
@@ -229,7 +213,6 @@ describe("VOTE_RESULT — a tie (defense success, both teams rewrite)", () => {
     match = transition(match, { type: "VOTE_RESULT", redVotes: 4, blueVotes: 4 }, 13_000);
     match = transition(match, { type: "FIRST_DONE", team: "red" }, 14_000);
     match = transition(match, { type: "NOMINATE" }, 15_000);
-    match = transition(match, { type: "ANSWER_DONE" }, 16_000);
     expect(match.phase).toBe("voting");
   });
 });
@@ -266,7 +249,6 @@ describe("VOTE_RESULT — defending side wins (reversal)", () => {
     expect(match.advancingTeam).toBe("blue");
 
     match = transition(match, { type: "NOMINATE" }, 14_000);
-    match = transition(match, { type: "ANSWER_DONE" }, 15_000);
     match = transition(match, { type: "VOTE_RESULT", redVotes: 9, blueVotes: 1 }, 16_000); // red reverses back
     expect(match.advancingTeam).toBe("red");
     expect(match.defendingTeam).toBe("blue");
@@ -280,11 +262,10 @@ describe("marker arrival at the edge", () => {
     match = transition(match, { type: "FIRST_DONE", team: "red" }, 0);
     // red advances from 50 toward 100 at 50/90000 per ms -> reaches 100 after 90_000ms
     const beforeArrival = transition(match, { type: "NOMINATE" }, 89_000);
-    expect(beforeArrival.phase).toBe("initial_writing");
+    expect(beforeArrival.phase).toBe("voting"); // 到達前ならNOMINATEは通常通り投票を開ける（まだfinishedではない）
 
-    // 到達前は voting へ遷移できる（まだfinishedではない）
+    // 同じ場面から今度は実際に投票へ進める
     match = transition(match, { type: "NOMINATE" }, 10_000);
-    match = transition(match, { type: "ANSWER_DONE" }, 11_000);
     match = transition(match, { type: "VOTE_RESULT", redVotes: 5, blueVotes: 1 }, 12_000);
     // frozen position was 50 + (10000 * 50/90000) = ~55.56, resumes advancing from there
     expect(match.phase).toBe("challenge_writing");
@@ -306,7 +287,6 @@ describe("marker arrival at the edge", () => {
     match = transition(match, { type: "START_MATCH" }, 0);
     match = transition(match, { type: "FIRST_DONE", team: "blue" }, 0);
     match = transition(match, { type: "NOMINATE" }, 9_000);
-    match = transition(match, { type: "ANSWER_DONE" }, 10_000);
     match = transition(match, { type: "VOTE_RESULT", redVotes: 1, blueVotes: 9 }, 11_000);
     expect(match.advancingTeam).toBe("blue");
 
@@ -327,9 +307,9 @@ describe("marker arrival at the edge", () => {
     match = transition(match, { type: "FIRST_DONE", team: "red" }, 0);
     match = transition(match, { type: "NOMINATE" }, 90_000);
     expect(match.phase).toBe("finished");
-    expect(() => transition(match, { type: "ANSWER_DONE" }, 90_001)).toThrow(
-      IllegalTransitionError,
-    );
+    expect(() =>
+      transition(match, { type: "VOTE_RESULT", redVotes: 0, blueVotes: 0 }, 90_001),
+    ).toThrow(IllegalTransitionError);
   });
 });
 
@@ -398,7 +378,7 @@ describe("currentAnswerer (今の回答者)", () => {
     expect(match.currentAnswerer).toEqual({ red: null, blue: null });
   });
 
-  it("records the champion's writer via FIRST_DONE and the challenger's writer via ANSWER_DONE", () => {
+  it("records the champion's writer via FIRST_DONE and the challenger's writer via NOMINATE", () => {
     let match = toVoting("red");
     expect(match.currentAnswerer).toEqual({ red: "赤1", blue: "青1" });
   });
@@ -407,8 +387,7 @@ describe("currentAnswerer (今の回答者)", () => {
     let match = toVoting("red");
     match = transition(match, { type: "VOTE_RESULT", redVotes: 5, blueVotes: 1 }, 13_000); // red wins, stays champion
     expect(match.currentAnswerer.red).toBe("赤1"); // 変わらない(答え直さない)
-    match = transition(match, { type: "NOMINATE" }, 14_000);
-    match = transition(match, { type: "ANSWER_DONE" }, 15_000); // blueの次走者(青2)が新しい挑戦回答を書く
+    match = transition(match, { type: "NOMINATE" }, 14_000); // blueの次走者(青2)が新しい挑戦回答を書く
     expect(match.currentAnswerer).toEqual({ red: "赤1", blue: "青2" });
   });
 
@@ -426,7 +405,6 @@ describe("currentAnswerer (今の回答者)", () => {
     match = transition(match, { type: "FIRST_DONE", team: "blue" }, 14_000);
     expect(match.currentAnswerer).toEqual({ red: "赤1", blue: "青2" }); // blueだけ更新される
     match = transition(match, { type: "NOMINATE" }, 15_000);
-    match = transition(match, { type: "ANSWER_DONE" }, 16_000);
     expect(match.currentAnswerer).toEqual({ red: "赤2", blue: "青2" }); // redも書き終えて更新される
   });
 });
@@ -511,7 +489,6 @@ describe("audience voting", () => {
     expect(match.votingRoundId).toBe(1);
 
     match = transition(match, { type: "NOMINATE" }, 14_000);
-    match = transition(match, { type: "ANSWER_DONE" }, 15_000);
     expect(match.votingRoundId).toBe(2);
     expect(match.audienceVotes).toEqual({ red: 0, blue: 0 });
   });

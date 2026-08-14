@@ -180,6 +180,11 @@ function applyFirstDone(
   return startAdvancing(withFlag, team, startPosition, now);
 }
 
+/**
+ * 阻止する側の前進停止と投票開始は同一アクション。回答完了を別クリックで待つ
+ * ワンクッションは運用上不要（生大喜利では指名の瞬間に回答が出そろっている）と判断し、
+ * 旧NOMINATE(前進停止のみ)と旧ANSWER_DONE(投票開始)を1つのイベントに統合した。
+ */
 function applyNominate(state: MatchState, now: number): MatchState {
   const inWritingPhase =
     state.phase === "initial_writing" ||
@@ -191,28 +196,13 @@ function applyNominate(state: MatchState, now: number): MatchState {
     );
   }
   const position = getMarkerPosition(state, now);
-  return {
-    ...state,
-    movement: { status: "frozen", position },
-  };
-}
-
-function applyAnswerDone(state: MatchState): MatchState {
-  const inWritingPhase =
-    state.phase === "initial_writing" ||
-    state.phase === "tie_writing" ||
-    state.phase === "challenge_writing";
-  if (!inWritingPhase || state.movement.status !== "frozen") {
-    throw new IllegalTransitionError(
-      `ANSWER_DONE requires a frozen marker (after NOMINATE) in initial_writing/tie_writing/challenge_writing, got phase='${state.phase}' movement='${state.movement.status}'`,
-    );
-  }
-  // ANSWER_DONE時点でstate.defendingTeamは常にセットされている
-  // (NOMINATE可能な時点でstartAdvancing済みのため、initial_writing/tie_writing/challenge_writing問わず成立する)。
+  // NOMINATE可能な時点(movement.status==="advancing")ではstartAdvancing済みのため、
+  // defendingTeamは常にセットされている。
   const writer = state.defendingTeam;
   return {
     ...state,
     phase: "voting",
+    movement: { status: "frozen", position },
     audienceVotes: { red: 0, blue: 0 },
     votingRoundId: state.votingRoundId + 1,
     currentAnswerer: writer
@@ -478,8 +468,6 @@ export function transition(
       return applyFirstDone(current, event.team, now);
     case "NOMINATE":
       return applyNominate(current, now);
-    case "ANSWER_DONE":
-      return applyAnswerDone(current);
     case "VOTE_RESULT":
       return applyVoteResult(current, event.redVotes, event.blueVotes, now);
     case "AUDIENCE_VOTE_CAST":

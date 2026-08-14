@@ -1,5 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import { getMarkerPosition, nextArrivalTime, type MatchState, type TeamId } from "@don-oogiri/engine";
+import {
+  currentWriters,
+  getMarkerPosition,
+  nextArrivalTime,
+  type MatchState,
+  type TeamId,
+} from "@don-oogiri/engine";
 
 interface MarkerBarProps {
   state: MatchState;
@@ -86,7 +92,10 @@ export function MarkerBar({ state, clockOffset }: MarkerBarProps) {
           🔵 {state.teams.blue.name}
         </span>
       </div>
-      <p className="marker-bar__position">{describeStatus(state, secondsToEdge)}</p>
+      <p className={`marker-bar__status marker-bar__status--${statusTone(state)}`}>
+        {describeStatus(state, secondsToEdge)}
+      </p>
+      <p className="marker-bar__instruction">{nextActionInstruction(state)}</p>
     </div>
   );
 }
@@ -95,14 +104,45 @@ function edgePosition(team: TeamId, laneLength: number): number {
   return team === "red" ? 0 : laneLength;
 }
 
-function describeStatus(state: MatchState, secondsToEdge: number | null): string {
-  if (secondsToEdge !== null && state.advancingTeam) {
-    return `${teamEmoji(state.advancingTeam)} 到達まで残り ${secondsToEdge.toFixed(1)}秒`;
+/** ステータス表示の色調（バッジのCSS用）。advancing中はそのチーム色、それ以外は中立色。 */
+function statusTone(state: MatchState): "red" | "blue" | "neutral" {
+  if (state.movement.status === "advancing" && state.advancingTeam) {
+    return state.advancingTeam;
   }
-  if (state.movement.status === "frozen") {
-    return "一時停止中（投票待ち）";
+  return "neutral";
+}
+
+/**
+ * 短い一言ステータス。「🔴進行中」「🔵進行中」「両チーム回答中」「投票中」の
+ * トンマナに合わせる。到達までの残り秒数は進行中の場合のみ補足として括弧書きで添える
+ * （secondsToEdgeを渡さない呼び出し元では括弧書きなしの短い形になる）。
+ * NOMINATE(前進停止)と投票開始は同一アクションなので、「回答中」に相当する中間状態は存在しない:
+ * movementがadvancingでなければidle(試合開始直後)かfrozen(同数書き直し直前)のいずれかで、
+ * どちらも両チームがまだ書き終えていない「両チーム回答中」を意味する。
+ */
+export function describeStatus(state: MatchState, secondsToEdge: number | null = null): string {
+  if (state.phase === "setup") return "準備中";
+  if (state.phase === "finished") return "試合終了";
+  if (state.phase === "voting") return "投票中";
+  if (state.movement.status === "advancing" && state.advancingTeam) {
+    const countdown = secondsToEdge !== null ? `（残り${secondsToEdge.toFixed(1)}秒）` : "";
+    return `${teamEmoji(state.advancingTeam)}進行中${countdown}`;
   }
-  return "開始待ち";
+  return "両チーム回答中";
+}
+
+/** 回答者側が今すべきことを一言で示す。 */
+function nextActionInstruction(state: MatchState): string {
+  if (state.phase === "setup") return "まもなく試合が始まります";
+  if (state.phase === "finished") return "お疲れ様でした！";
+  if (state.phase === "voting") return "観客の投票結果をお待ちください";
+
+  const writers = currentWriters(state);
+  if (writers.length === 2) {
+    return "書き終えたチームからMCに知らせてください";
+  }
+  const writer = writers[0];
+  return writer ? `${teamEmoji(writer.team)} 回答ができたら指名（挙手）してください` : "";
 }
 
 function teamEmoji(team: TeamId): string {
