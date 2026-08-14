@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   createMatch,
   currentWriter,
+  currentWriters,
   getMarkerPosition,
   nextArrivalTime,
   transition,
@@ -162,13 +163,6 @@ describe("VOTE_RESULT — advancing side wins (including ties)", () => {
     });
   });
 
-  it("a tie vote counts as an advancing-side win", () => {
-    let match = toVoting("red");
-    match = transition(match, { type: "VOTE_RESULT", redVotes: 4, blueVotes: 4 }, 13_000);
-    expect(match.phase).toBe("challenge_writing");
-    expect(match.advancingTeam).toBe("red");
-  });
-
   it("rotates the defending team's next runner after a loss", () => {
     let match = toVoting("red");
     expect(match.teams.blue.nextRunnerIndex).toBe(0);
@@ -176,15 +170,67 @@ describe("VOTE_RESULT — advancing side wins (including ties)", () => {
     expect(match.teams.blue.nextRunnerIndex).toBe(1);
     expect(match.teams.red.nextRunnerIndex).toBe(0);
   });
+});
 
-  it("on a tie, rotates BOTH teams' next runner (defense success, fresh matchup)", () => {
+describe("VOTE_RESULT — a tie (defense success, both teams rewrite)", () => {
+  it("moves to tie_writing with the marker frozen at the tied position, both roles cleared", () => {
+    let match = toVoting("red");
+    const frozenPosition = 55; // 9s * (50/90000) = 5 -> 50+5
+    match = transition(match, { type: "VOTE_RESULT", redVotes: 4, blueVotes: 4 }, 13_000);
+
+    expect(match.phase).toBe("tie_writing");
+    expect(match.advancingTeam).toBeNull();
+    expect(match.defendingTeam).toBeNull();
+    expect(match.bothWritingFirstDone).toBe(false);
+    expect(match.movement).toEqual({ status: "frozen", position: frozenPosition });
+    // 位置は保持されたまま(前進も反転もしていない)ので同じ位置のままstillに見える
+    expect(getMarkerPosition(match, 999_999)).toBe(frozenPosition);
+  });
+
+  it("rotates BOTH teams' next runner so the same matchup doesn't repeat", () => {
     let match = toVoting("red");
     expect(match.teams.red.nextRunnerIndex).toBe(0);
     expect(match.teams.blue.nextRunnerIndex).toBe(0);
     match = transition(match, { type: "VOTE_RESULT", redVotes: 4, blueVotes: 4 }, 13_000);
-    expect(match.advancingTeam).toBe("red");
-    expect(match.teams.blue.nextRunnerIndex).toBe(1);
     expect(match.teams.red.nextRunnerIndex).toBe(1);
+    expect(match.teams.blue.nextRunnerIndex).toBe(1);
+  });
+
+  it("both teams can FIRST_DONE again in tie_writing, starting the winner from the tied position (not center)", () => {
+    let match = toVoting("red");
+    match = transition(match, { type: "VOTE_RESULT", redVotes: 4, blueVotes: 4 }, 13_000);
+    const tiedPosition = 55;
+
+    match = transition(match, { type: "FIRST_DONE", team: "blue" }, 14_000);
+    expect(match.advancingTeam).toBe("blue");
+    expect(match.defendingTeam).toBe("red");
+    expect(match.bothWritingFirstDone).toBe(true);
+    expect(match.movement).toMatchObject({
+      status: "advancing",
+      startPosition: tiedPosition,
+      startTime: 14_000,
+      direction: -1, // blueは0方向へ押し返す
+    });
+    // 中央(50)からではなく、同数になった時点の位置(55)から再開している
+    expect(getMarkerPosition(match, 14_000)).toBe(tiedPosition);
+  });
+
+  it("rejects a second FIRST_DONE within the same tie_writing round", () => {
+    let match = toVoting("red");
+    match = transition(match, { type: "VOTE_RESULT", redVotes: 4, blueVotes: 4 }, 13_000);
+    match = transition(match, { type: "FIRST_DONE", team: "red" }, 14_000);
+    expect(() => transition(match, { type: "FIRST_DONE", team: "blue" }, 14_000)).toThrow(
+      IllegalTransitionError,
+    );
+  });
+
+  it("completes a full tie_writing round back into voting", () => {
+    let match = toVoting("red");
+    match = transition(match, { type: "VOTE_RESULT", redVotes: 4, blueVotes: 4 }, 13_000);
+    match = transition(match, { type: "FIRST_DONE", team: "red" }, 14_000);
+    match = transition(match, { type: "NOMINATE" }, 15_000);
+    match = transition(match, { type: "ANSWER_DONE" }, 16_000);
+    expect(match.phase).toBe("voting");
   });
 });
 
@@ -239,7 +285,7 @@ describe("marker arrival at the edge", () => {
     // 到達前は voting へ遷移できる（まだfinishedではない）
     match = transition(match, { type: "NOMINATE" }, 10_000);
     match = transition(match, { type: "ANSWER_DONE" }, 11_000);
-    match = transition(match, { type: "VOTE_RESULT", redVotes: 5, blueVotes: 5 }, 12_000);
+    match = transition(match, { type: "VOTE_RESULT", redVotes: 5, blueVotes: 1 }, 12_000);
     // frozen position was 50 + (10000 * 50/90000) = ~55.56, resumes advancing from there
     expect(match.phase).toBe("challenge_writing");
 
@@ -261,7 +307,7 @@ describe("marker arrival at the edge", () => {
     match = transition(match, { type: "FIRST_DONE", team: "blue" }, 0);
     match = transition(match, { type: "NOMINATE" }, 9_000);
     match = transition(match, { type: "ANSWER_DONE" }, 10_000);
-    match = transition(match, { type: "VOTE_RESULT", redVotes: 5, blueVotes: 5 }, 11_000);
+    match = transition(match, { type: "VOTE_RESULT", redVotes: 1, blueVotes: 9 }, 11_000);
     expect(match.advancingTeam).toBe("blue");
 
     const startPosition = (match.movement as { startPosition: number }).startPosition;
@@ -305,6 +351,83 @@ describe("currentWriter", () => {
     let match = toVoting("red");
     match = transition(match, { type: "VOTE_RESULT", redVotes: 5, blueVotes: 1 }, 13_000);
     expect(currentWriter(match)).toEqual({ team: "blue", name: "青2" });
+  });
+
+  it("is null while both teams rewrite simultaneously in tie_writing", () => {
+    let match = toVoting("red");
+    match = transition(match, { type: "VOTE_RESULT", redVotes: 4, blueVotes: 4 }, 13_000);
+    expect(currentWriter(match)).toBeNull();
+  });
+});
+
+describe("currentWriters", () => {
+  it("returns both teams' next runner while writing simultaneously at match start", () => {
+    let match = newMatch();
+    match = transition(match, { type: "START_MATCH" }, 0);
+    expect(currentWriters(match)).toEqual([
+      { team: "red", name: "赤1" },
+      { team: "blue", name: "青1" },
+    ]);
+  });
+
+  it("returns both teams' next runner while rewriting after a tie", () => {
+    let match = toVoting("red");
+    match = transition(match, { type: "VOTE_RESULT", redVotes: 4, blueVotes: 4 }, 13_000);
+    expect(currentWriters(match)).toEqual([
+      { team: "red", name: "赤2" },
+      { team: "blue", name: "青2" },
+    ]);
+  });
+
+  it("returns a single entry once one side is done writing", () => {
+    let match = newMatch();
+    match = transition(match, { type: "START_MATCH" }, 0);
+    match = transition(match, { type: "FIRST_DONE", team: "red" }, 0);
+    expect(currentWriters(match)).toEqual([{ team: "blue", name: "青1" }]);
+  });
+
+  it("returns an empty array when nobody is currently expected to write", () => {
+    let match = newMatch();
+    expect(currentWriters(match)).toEqual([]);
+  });
+});
+
+describe("currentAnswerer (今の回答者)", () => {
+  it("starts as null for both teams before anyone has finished writing", () => {
+    const match = newMatch();
+    expect(match.currentAnswerer).toEqual({ red: null, blue: null });
+  });
+
+  it("records the champion's writer via FIRST_DONE and the challenger's writer via ANSWER_DONE", () => {
+    let match = toVoting("red");
+    expect(match.currentAnswerer).toEqual({ red: "赤1", blue: "青1" });
+  });
+
+  it("keeps the champion's currentAnswerer unchanged while they keep winning (they don't rewrite)", () => {
+    let match = toVoting("red");
+    match = transition(match, { type: "VOTE_RESULT", redVotes: 5, blueVotes: 1 }, 13_000); // red wins, stays champion
+    expect(match.currentAnswerer.red).toBe("赤1"); // 変わらない(答え直さない)
+    match = transition(match, { type: "NOMINATE" }, 14_000);
+    match = transition(match, { type: "ANSWER_DONE" }, 15_000); // blueの次走者(青2)が新しい挑戦回答を書く
+    expect(match.currentAnswerer).toEqual({ red: "赤1", blue: "青2" });
+  });
+
+  it("updates the reversed champion's currentAnswerer to the winning challenger", () => {
+    let match = toVoting("red");
+    match = transition(match, { type: "VOTE_RESULT", redVotes: 1, blueVotes: 9 }, 13_000); // blue reverses, becomes champion
+    expect(match.currentAnswerer).toEqual({ red: "赤1", blue: "青1" }); // blueの回答はそのまま新チャンピオン回答に
+  });
+
+  it("on a tie, keeps the previous answerers visible until each team finishes rewriting", () => {
+    let match = toVoting("red");
+    match = transition(match, { type: "VOTE_RESULT", redVotes: 4, blueVotes: 4 }, 13_000);
+    expect(match.currentAnswerer).toEqual({ red: "赤1", blue: "青1" }); // 直前の回答者がまだ表示され続ける
+
+    match = transition(match, { type: "FIRST_DONE", team: "blue" }, 14_000);
+    expect(match.currentAnswerer).toEqual({ red: "赤1", blue: "青2" }); // blueだけ更新される
+    match = transition(match, { type: "NOMINATE" }, 15_000);
+    match = transition(match, { type: "ANSWER_DONE" }, 16_000);
+    expect(match.currentAnswerer).toEqual({ red: "赤2", blue: "青2" }); // redも書き終えて更新される
   });
 });
 
@@ -374,11 +497,11 @@ describe("audience voting", () => {
     expect(match.advancingTeam).toBe("blue"); // 1票 vs 2票で阻止する側(blue)が勝ち反転
   });
 
-  it("CLOSE_VOTING with a 0-0 tally falls through to the tie rule (advancing side wins)", () => {
+  it("CLOSE_VOTING with a 0-0 tally falls through to the tie rule (both teams rewrite)", () => {
     let match = toVoting("red");
     match = transition(match, { type: "CLOSE_VOTING" }, 13_000);
-    expect(match.phase).toBe("challenge_writing");
-    expect(match.advancingTeam).toBe("red");
+    expect(match.phase).toBe("tie_writing");
+    expect(match.advancingTeam).toBeNull();
   });
 
   it("resets the tally and bumps the round id again on the following round", () => {
@@ -520,8 +643,9 @@ describe("RESET_MATCH", () => {
     expect(match.movement).toEqual({ status: "idle" });
     expect(match.advancingTeam).toBeNull();
     expect(match.defendingTeam).toBeNull();
-    expect(match.initialFirstDone).toBe(false);
+    expect(match.bothWritingFirstDone).toBe(false);
     expect(match.winner).toBeNull();
+    expect(match.currentAnswerer).toEqual({ red: null, blue: null });
     expect(match.audienceVotes).toEqual({ red: 0, blue: 0 });
     expect(match.teams.red.nextRunnerIndex).toBe(0);
     expect(match.teams.blue.nextRunnerIndex).toBe(0);

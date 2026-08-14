@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { currentWriter, type MatchEvent, type MatchState, type TeamId } from "@don-oogiri/engine";
+import { currentWriters, type MatchEvent, type MatchState, type TeamId } from "@don-oogiri/engine";
 
 interface MatchControlsProps {
   state: MatchState;
@@ -11,11 +11,12 @@ const PHASE_LABEL: Record<MatchState["phase"], string> = {
   initial_writing: "INITIAL_WRITING（両チーム執筆中）",
   voting: "VOTE（観客投票中）",
   challenge_writing: "CHALLENGE_WRITING",
+  tie_writing: "TIE_WRITING（同数につき両チーム書き直し中）",
   finished: "試合終了",
 };
 
 export function MatchControls({ state, onSend }: MatchControlsProps) {
-  const writer = currentWriter(state);
+  const writers = currentWriters(state);
 
   return (
     <div className="match-controls">
@@ -29,8 +30,16 @@ export function MatchControls({ state, onSend }: MatchControlsProps) {
         <dd>{state.advancingTeam ? teamLabel(state, state.advancingTeam) : "-"}</dd>
         <dt>阻止する側</dt>
         <dd>{state.defendingTeam ? teamLabel(state, state.defendingTeam) : "-"}</dd>
-        <dt>次に執筆すべき人</dt>
-        <dd>{writer ? `${teamLabel(state, writer.team)} / ${writer.name}` : "-"}</dd>
+        <dt>今の回答者（🔴/🔵）</dt>
+        <dd>
+          {state.currentAnswerer.red ?? "-"} / {state.currentAnswerer.blue ?? "-"}
+        </dd>
+        <dt>次の回答者</dt>
+        <dd>
+          {writers.length > 0
+            ? writers.map((w) => `${teamLabel(state, w.team)} / ${w.name}`).join("、")
+            : "-"}
+        </dd>
         <dt>マーカー状態</dt>
         <dd>{state.movement.status}</dd>
       </dl>
@@ -55,7 +64,9 @@ function renderActions(state: MatchState, onSend: (event: MatchEvent) => void) {
     return <button onClick={() => onSend({ type: "START_MATCH" })}>試合開始</button>;
   }
 
-  if (state.phase === "initial_writing" && !state.initialFirstDone) {
+  const inBothWritingPhase = state.phase === "initial_writing" || state.phase === "tie_writing";
+
+  if (inBothWritingPhase && !state.bothWritingFirstDone) {
     return (
       <>
         <button onClick={() => onSend({ type: "FIRST_DONE", team: "red" })}>
@@ -68,7 +79,7 @@ function renderActions(state: MatchState, onSend: (event: MatchEvent) => void) {
     );
   }
 
-  if (state.phase === "initial_writing" || state.phase === "challenge_writing") {
+  if (inBothWritingPhase || state.phase === "challenge_writing") {
     if (state.movement.status === "advancing") {
       return <button onClick={() => onSend({ type: "NOMINATE" })}>指名（前進ストップ）</button>;
     }

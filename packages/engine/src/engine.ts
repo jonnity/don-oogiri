@@ -61,8 +61,9 @@ export function createMatch(
     movement: { status: "idle" },
     advancingTeam: null,
     defendingTeam: null,
-    initialFirstDone: false,
+    bothWritingFirstDone: false,
     winner: null,
+    currentAnswerer: { red: null, blue: null },
     audienceVotes: { red: 0, blue: 0 },
     votingRoundId: 0,
     topic,
@@ -153,26 +154,40 @@ function applyFirstDone(
   team: TeamId,
   now: number,
 ): MatchState {
-  if (state.phase !== "initial_writing") {
+  const inBothWritingPhase =
+    state.phase === "initial_writing" || state.phase === "tie_writing";
+  if (!inBothWritingPhase) {
     throw new IllegalTransitionError(
-      `FIRST_DONE is only valid in 'initial_writing', got '${state.phase}'`,
+      `FIRST_DONE is only valid in 'initial_writing'/'tie_writing', got '${state.phase}'`,
     );
   }
-  if (state.initialFirstDone) {
+  if (state.bothWritingFirstDone) {
     throw new IllegalTransitionError(
-      "FIRST_DONE was already recorded for this match",
+      "FIRST_DONE was already recorded for this writing round",
     );
   }
-  const withFlag: MatchState = { ...state, initialFirstDone: true };
-  return startAdvancing(withFlag, team, state.config.laneLength / 2, now);
+  // startPositionはgetMarkerPositionで決まる: 試合開始直後(idle)なら中央、
+  // tie_writing(frozen)なら同数になった時点のマーカー位置から書き直しが始まる。
+  const startPosition = getMarkerPosition(state, now);
+  const withFlag: MatchState = {
+    ...state,
+    bothWritingFirstDone: true,
+    currentAnswerer: {
+      ...state.currentAnswerer,
+      [team]: currentRunnerName(state.teams[team]),
+    },
+  };
+  return startAdvancing(withFlag, team, startPosition, now);
 }
 
 function applyNominate(state: MatchState, now: number): MatchState {
   const inWritingPhase =
-    state.phase === "initial_writing" || state.phase === "challenge_writing";
+    state.phase === "initial_writing" ||
+    state.phase === "tie_writing" ||
+    state.phase === "challenge_writing";
   if (!inWritingPhase || state.movement.status !== "advancing") {
     throw new IllegalTransitionError(
-      `NOMINATE requires an advancing marker in initial_writing/challenge_writing, got phase='${state.phase}' movement='${state.movement.status}'`,
+      `NOMINATE requires an advancing marker in initial_writing/tie_writing/challenge_writing, got phase='${state.phase}' movement='${state.movement.status}'`,
     );
   }
   const position = getMarkerPosition(state, now);
@@ -184,17 +199,25 @@ function applyNominate(state: MatchState, now: number): MatchState {
 
 function applyAnswerDone(state: MatchState): MatchState {
   const inWritingPhase =
-    state.phase === "initial_writing" || state.phase === "challenge_writing";
+    state.phase === "initial_writing" ||
+    state.phase === "tie_writing" ||
+    state.phase === "challenge_writing";
   if (!inWritingPhase || state.movement.status !== "frozen") {
     throw new IllegalTransitionError(
-      `ANSWER_DONE requires a frozen marker (after NOMINATE) in initial_writing/challenge_writing, got phase='${state.phase}' movement='${state.movement.status}'`,
+      `ANSWER_DONE requires a frozen marker (after NOMINATE) in initial_writing/tie_writing/challenge_writing, got phase='${state.phase}' movement='${state.movement.status}'`,
     );
   }
+  // ANSWER_DONE時点でstate.defendingTeamは常にセットされている
+  // (NOMINATE可能な時点でstartAdvancing済みのため、initial_writing/tie_writing/challenge_writing問わず成立する)。
+  const writer = state.defendingTeam;
   return {
     ...state,
     phase: "voting",
     audienceVotes: { red: 0, blue: 0 },
     votingRoundId: state.votingRoundId + 1,
+    currentAnswerer: writer
+      ? { ...state.currentAnswerer, [writer]: currentRunnerName(state.teams[writer]) }
+      : state.currentAnswerer,
   };
 }
 
@@ -285,16 +308,30 @@ function applyVoteResult(
       ? state.movement.position
       : getMarkerPosition(state, now);
 
+  if (isTie) {
+    // 同数票 = 防衛成功（反転はしない）。ただし同じ顔合わせが続かないよう両チームとも
+    // 次走者に交代し、initial_writingと同じ「両チーム同時執筆」の形でゼロから書き直す。
+    // マーカーは同数になった時点の位置のまま(frozen)で止まっており、次のFIRST_DONEで
+    // その位置から改めて前進が始まる。
+    const withBothRotated = incrementRunner(
+      incrementRunner(state, defendingTeam),
+      advancingTeam,
+    );
+    return {
+      ...withBothRotated,
+      phase: "tie_writing",
+      advancingTeam: null,
+      defendingTeam: null,
+      bothWritingFirstDone: false,
+      movement: { status: "frozen", position: frozenPosition },
+    };
+  }
+
   if (!defendingWins) {
     // 進んでる側の勝ち: そのままchallenge_writing継続。負けた阻止側の次走者が執筆。
-    // 同数票の場合は「防衛成功」として、同じ顔合わせが続かないよう進んでる側の次走者も交代させる
-    // （進んでる側の回答自体は変わらず、答えるべき次の人が繰り上がるだけ）。
-    const withDefenderRotated = incrementRunner(state, defendingTeam);
-    const withRunnersRotated = isTie
-      ? incrementRunner(withDefenderRotated, advancingTeam)
-      : withDefenderRotated;
+    const withNextRunner = incrementRunner(state, defendingTeam);
     const resumed = startAdvancing(
-      withRunnersRotated,
+      withNextRunner,
       advancingTeam,
       frozenPosition,
       now,
@@ -371,11 +408,12 @@ function applyCorrectMarkerPosition(
 ): MatchState {
   const correctablePhase =
     state.phase === "initial_writing" ||
+    state.phase === "tie_writing" ||
     state.phase === "challenge_writing" ||
     state.phase === "voting";
   if (!correctablePhase || state.movement.status === "idle") {
     throw new IllegalTransitionError(
-      `CORRECT_MARKER_POSITION requires an active marker (advancing/frozen) in initial_writing/challenge_writing/voting, got phase='${state.phase}' movement='${state.movement.status}'`,
+      `CORRECT_MARKER_POSITION requires an active marker (advancing/frozen) in initial_writing/tie_writing/challenge_writing/voting, got phase='${state.phase}' movement='${state.movement.status}'`,
     );
   }
   if (!Number.isFinite(position)) {
@@ -414,8 +452,9 @@ function applyResetMatch(state: MatchState): MatchState {
     movement: { status: "idle" },
     advancingTeam: null,
     defendingTeam: null,
-    initialFirstDone: false,
+    bothWritingFirstDone: false,
     winner: null,
+    currentAnswerer: { red: null, blue: null },
     audienceVotes: { red: 0, blue: 0 },
   };
 }
@@ -480,22 +519,38 @@ function currentRunnerName(roster: TeamRoster): string {
   return name;
 }
 
-/** 次に執筆すべき人（表示用）。該当者がいなければnull。 */
+/**
+ * 次に執筆すべき人（表示用、単一）。initial_writing/tie_writingで両チームがまだ
+ * 同時執筆中（どちらも書き終えていない）の場合は1人に特定できないためnull
+ * （その場合はcurrentWritersで両チーム分を取得する）。該当者がいなければnull。
+ */
 export function currentWriter(
   state: MatchState,
 ): { team: TeamId; name: string } | null {
-  if (state.phase === "initial_writing") {
-    if (!state.initialFirstDone) return null; // 両チーム同時執筆中で特定不可
-    const defending = state.defendingTeam;
-    if (!defending) return null;
-    const roster = state.teams[defending];
-    return { team: defending, name: currentRunnerName(roster) };
+  const inBothWritingPhase =
+    state.phase === "initial_writing" || state.phase === "tie_writing";
+  if (inBothWritingPhase && !state.bothWritingFirstDone) return null;
+  if (!inBothWritingPhase && state.phase !== "challenge_writing") return null;
+  const defending = state.defendingTeam;
+  if (!defending) return null;
+  return { team: defending, name: currentRunnerName(state.teams[defending]) };
+}
+
+/**
+ * 次に執筆すべき人（表示用、複数対応）。initial_writing/tie_writingで両チームが
+ * 同時執筆中の間は両チーム分（最大2件）、それ以外はcurrentWriterと同じ1件（該当者なしなら0件）を返す。
+ */
+export function currentWriters(
+  state: MatchState,
+): { team: TeamId; name: string }[] {
+  const inBothWritingPhase =
+    state.phase === "initial_writing" || state.phase === "tie_writing";
+  if (inBothWritingPhase && !state.bothWritingFirstDone) {
+    return (["red", "blue"] as const).map((team) => ({
+      team,
+      name: currentRunnerName(state.teams[team]),
+    }));
   }
-  if (state.phase === "challenge_writing") {
-    const defending = state.defendingTeam;
-    if (!defending) return null;
-    const roster = state.teams[defending];
-    return { team: defending, name: currentRunnerName(roster) };
-  }
-  return null;
+  const single = currentWriter(state);
+  return single ? [single] : [];
 }

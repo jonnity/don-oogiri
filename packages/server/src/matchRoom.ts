@@ -15,15 +15,20 @@ import type { Env } from "./env.js";
 const STORAGE_KEY = "match";
 
 /**
- * Phase 5より前に保存されたMatchState(storage)にはtopic/qrVisible/speedMultiplierが
- * 存在しない。デシリアライズ直後に既定値で補い、NaN速度などの壊れた状態で復元されるのを防ぐ。
+ * 過去のバージョンで保存されたMatchState(storage)には、その時点でまだ存在しなかった
+ * フィールドが欠けていることがある。デシリアライズ直後に既定値で補い、壊れた状態で
+ * 復元されるのを防ぐ。`initialFirstDone`は`bothWritingFirstDone`にリネームされたため、
+ * 旧フィールド名で保存された試合中のデータもフォールバックとして拾う。
  */
 function normalizeMatch(match: MatchState): MatchState {
+  const legacy = match as MatchState & { initialFirstDone?: boolean };
   return {
     ...match,
     topic: match.topic ?? "",
     qrVisible: match.qrVisible ?? true,
     speedMultiplier: match.speedMultiplier ?? 1,
+    bothWritingFirstDone: match.bothWritingFirstDone ?? legacy.initialFirstDone ?? false,
+    currentAnswerer: match.currentAnswerer ?? { red: null, blue: null },
   };
 }
 

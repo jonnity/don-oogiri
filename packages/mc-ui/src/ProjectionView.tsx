@@ -1,5 +1,5 @@
 import { QRCodeSVG } from "qrcode.react";
-import { currentWriter, type MatchState } from "@don-oogiri/engine";
+import { currentWriters, type MatchState } from "@don-oogiri/engine";
 import { buildAudienceUrl } from "./AudienceLink.js";
 import { MarkerBar } from "./MarkerBar.js";
 import { useMatchSocket } from "./useMatchSocket.js";
@@ -15,6 +15,7 @@ const PHASE_LABEL: Record<MatchState["phase"], string> = {
   initial_writing: "両チーム執筆中",
   voting: "観客投票中",
   challenge_writing: "挑戦中",
+  tie_writing: "同数！両チームが書き直し中",
   finished: "試合終了",
 };
 
@@ -34,7 +35,7 @@ export function ProjectionView({ serverUrl, audienceBaseUrl, matchId }: Projecti
     );
   }
 
-  const writer = currentWriter(state);
+  const writers = currentWriters(state);
 
   return (
     <main className="projection">
@@ -44,9 +45,15 @@ export function ProjectionView({ serverUrl, audienceBaseUrl, matchId }: Projecti
         {state.topic}
       </p>
       <MarkerBar state={state} clockOffset={clockOffset} />
-      {writer && (
+      {state.phase === "tie_writing" && (
         <p className="projection__writer">
-          次の回答者: {writer.team === "red" ? "🔴" : "🔵"} {writer.name}
+          今の回答者: 🔴 {state.currentAnswerer.red ?? "-"}　🔵 {state.currentAnswerer.blue ?? "-"}
+        </p>
+      )}
+      {writers.length > 0 && (
+        <p className="projection__writer">
+          次の回答者:{" "}
+          {writers.map((w) => `${w.team === "red" ? "🔴" : "🔵"} ${w.name}`).join("　")}
         </p>
       )}
       {state.phase === "finished" && (

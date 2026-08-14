@@ -15,6 +15,7 @@ const PHASE_LABEL: Record<MatchState["phase"], string> = {
   initial_writing: "両チームが回答を書いています",
   voting: "投票してください！",
   challenge_writing: "回答者が執筆中です",
+  tie_writing: "同数でした！両チームが新しい回答を書いています",
   finished: "試合終了",
 };
 

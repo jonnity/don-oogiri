@@ -35,6 +35,10 @@ export type Phase =
   | "initial_writing"
   | "voting"
   | "challenge_writing"
+  /** 観客投票が同数だった場合の「防衛成功」状態。同じ顔合わせが続かないよう両チームとも
+   * 次走者に交代し、initial_writingと同じ「両チーム同時執筆」の形でゼロから書き直す。
+   * 開始位置は同数になった時点のマーカー位置（中央ではない）。 */
+  | "tie_writing"
   | "finished";
 
 export interface MatchState {
@@ -42,13 +46,19 @@ export interface MatchState {
   config: MatchConfig;
   teams: Record<TeamId, TeamRoster>;
   movement: MarkerMovement;
-  /** 現在「進んでる側」（暫定含む）。setup中とinitial_writingで誰も書き終えていない間はnull。 */
+  /** 現在「進んでる側」（暫定含む）。setup中とinitial_writing/tie_writingで誰も書き終えていない間はnull。 */
   advancingTeam: TeamId | null;
   /** 現在執筆すべき（あるいは執筆中の）「阻止する側」。 */
   defendingTeam: TeamId | null;
-  /** initial_writingで最初に書き終えたチームが確定するまでのフラグ。 */
-  initialFirstDone: boolean;
+  /** initial_writing/tie_writingで最初に書き終えたチームが確定するまでのフラグ。両フェーズで共用する。 */
+  bothWritingFirstDone: boolean;
   winner: TeamId | null;
+  /**
+   * 「今の回答者」＝各チームの現在アクティブな回答（進んでる側の現チャンピオン回答、または
+   * 阻止する側の直近の挑戦回答）を書いたメンバー名。FIRST_DONE/ANSWER_DONEで更新される。
+   * まだ誰も書き終えていなければnull。
+   */
+  currentAnswerer: Record<TeamId, string | null>;
   /** 観客投票の現在ラウンドの集計。votingフェーズ開始のたびに0にリセットされる。 */
   audienceVotes: Record<TeamId, number>;
   /** 投票ラウンドの識別子。votingフェーズに入るたびに+1。観客側の「このラウンドは投票済みか」判定に使う。 */
