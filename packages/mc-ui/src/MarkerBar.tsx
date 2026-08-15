@@ -1,11 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import {
-  currentWriters,
-  getMarkerPosition,
-  nextArrivalTime,
-  type MatchState,
-  type TeamId,
-} from "@don-oogiri/engine";
+import { getMarkerPosition, nextArrivalTime, type MatchState, type TeamId } from "@don-oogiri/engine";
 
 interface MarkerBarProps {
   state: MatchState;
@@ -95,7 +89,6 @@ export function MarkerBar({ state, clockOffset }: MarkerBarProps) {
       <p className={`marker-bar__status marker-bar__status--${statusTone(state)}`}>
         {describeStatus(state, secondsToEdge)}
       </p>
-      <p className="marker-bar__instruction">{nextActionInstruction(state)}</p>
     </div>
   );
 }
@@ -129,20 +122,6 @@ export function describeStatus(state: MatchState, secondsToEdge: number | null =
     return `${teamEmoji(state.advancingTeam)}進行中${countdown}`;
   }
   return "両チーム回答中";
-}
-
-/** 回答者側が今すべきことを一言で示す。 */
-function nextActionInstruction(state: MatchState): string {
-  if (state.phase === "setup") return "まもなく試合が始まります";
-  if (state.phase === "finished") return "お疲れ様でした！";
-  if (state.phase === "voting") return "観客の投票結果をお待ちください";
-
-  const writers = currentWriters(state);
-  if (writers.length === 2) {
-    return "書き終えたチームからMCに知らせてください";
-  }
-  const writer = writers[0];
-  return writer ? `${teamEmoji(writer.team)} 回答ができたら指名（挙手）してください` : "";
 }
 
 function teamEmoji(team: TeamId): string {

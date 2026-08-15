@@ -187,14 +187,6 @@ button {
   background: #666;
 }
 
-.marker-bar__instruction {
-  font-size: 0.9rem;
-  font-weight: bold;
-  color: #b8860b;
-  margin: 0.35rem 0 0;
-  min-height: 1.2em;
-}
-
 .winner-banner {
   font-size: 1.2rem;
   font-weight: bold;
