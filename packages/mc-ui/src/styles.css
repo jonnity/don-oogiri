@@ -257,10 +257,6 @@ button {
   text-align: center;
 }
 
-.projection__phase {
-  font-size: 1.5rem;
-}
-
 .projection__next-writers {
   display: flex;
   justify-content: space-between;

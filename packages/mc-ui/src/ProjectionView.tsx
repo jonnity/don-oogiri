@@ -1,7 +1,7 @@
 import { QRCodeSVG } from "qrcode.react";
 import { currentWriters, type TeamId } from "@don-oogiri/engine";
 import { buildAudienceUrl } from "./AudienceLink.js";
-import { describeStatus, MarkerBar } from "./MarkerBar.js";
+import { MarkerBar } from "./MarkerBar.js";
 import { useMatchSocket } from "./useMatchSocket.js";
 
 interface ProjectionViewProps {
@@ -31,7 +31,6 @@ export function ProjectionView({ serverUrl, audienceBaseUrl, matchId }: Projecti
 
   return (
     <main className="projection">
-      <h1 className="projection__phase">{describeStatus(state)}</h1>
       <p className="projection__topic">
         <span className="projection__topic-label">お題</span>
         {state.topic}

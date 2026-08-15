@@ -10,15 +10,11 @@ interface PhaseViewProps {
   onVote: (team: TeamId) => void;
 }
 
-const PHASE_LABEL: Record<MatchState["phase"], string> = {
-  setup: "まもなく開始します",
-  initial_writing: "両チームが回答を書いています",
-  voting: "投票してください！",
-  challenge_writing: "回答者が執筆中です",
-  tie_writing: "同数でした！両チームが新しい回答を書いています",
-  finished: "試合終了",
-};
-
+/**
+ * 観客はゲーム内部の細かいフェーズ(INITIAL_WRITING/TIE_WRITING等)を知る必要がないので、
+ * 「投票中か、そうでないか」の2値まで単純化する。投票中は投票UI自体が状態を示すので
+ * 追加の文言は出さない。
+ */
 export function PhaseView({ state, matchId, lastVoteAck, onVote }: PhaseViewProps) {
   if (state.phase === "finished") {
     return (
@@ -33,7 +29,6 @@ export function PhaseView({ state, matchId, lastVoteAck, onVote }: PhaseViewProp
   if (state.phase === "voting") {
     return (
       <div className="phase-view">
-        <p className="phase-label">{PHASE_LABEL[state.phase]}</p>
         <VotingSection state={state} matchId={matchId} lastVoteAck={lastVoteAck} onVote={onVote} />
       </div>
     );
@@ -41,7 +36,7 @@ export function PhaseView({ state, matchId, lastVoteAck, onVote }: PhaseViewProp
 
   return (
     <div className="phase-view">
-      <p className="phase-label">{PHASE_LABEL[state.phase]}</p>
+      <p className="phase-label">投票開始をお待ちください</p>
       <p className="match-context">
         🔴 {state.teams.red.name} vs 🔵 {state.teams.blue.name}
       </p>
