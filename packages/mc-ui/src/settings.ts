@@ -70,7 +70,9 @@ export function setAudienceBaseUrl(url: string): void {
 
 /**
  * 進行中の試合セッション（matchId）。作成のたびに新しいQRコードを配って回るのは
- * 運用上不便なので、MCが明示的に「新しい試合を作る」を選ぶまでは同一クライアントで使い回す。
+ * 運用上不便なので、MCが明示的に「セッションを破棄して新規開始」を選ぶまでは
+ * 同一クライアントで使い回す（「次の試合を作る」はこのmatchIdを維持したまま
+ * NEW_MATCHイベントで中身だけ差し替えるので、ここはクリアしない）。
  */
 export function resolveMatchId(): string | null {
   return readStored(MATCH_ID_KEY);

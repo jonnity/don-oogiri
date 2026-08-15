@@ -641,3 +641,55 @@ describe("RESET_MATCH", () => {
     expect(match.phase).toBe("initial_writing");
   });
 });
+
+describe("NEW_MATCH", () => {
+  it("replaces teams/topic/config with a fresh setup state, but keeps votingRoundId", () => {
+    let match = toVoting("red");
+    match = transition(match, { type: "VOTE_RESULT", redVotes: 5, blueVotes: 1 }, 13_000);
+    const roundIdBeforeNewMatch = match.votingRoundId;
+    expect(roundIdBeforeNewMatch).toBeGreaterThan(0);
+
+    const newConfig = { laneLength: 100, centerToEdgeMs: 30_000 };
+    match = transition(
+      match,
+      {
+        type: "NEW_MATCH",
+        config: newConfig,
+        red: { name: "新赤チーム", members: ["新赤1"] },
+        blue: { name: "新青チーム", members: ["新青1"] },
+        topic: "次のお題",
+      },
+      20_000,
+    );
+
+    expect(match.phase).toBe("setup");
+    expect(match.config).toEqual(newConfig);
+    expect(match.teams.red.name).toBe("新赤チーム");
+    expect(match.teams.red.members).toEqual(["新赤1"]);
+    expect(match.teams.blue.name).toBe("新青チーム");
+    expect(match.topic).toBe("次のお題");
+    expect(match.movement).toEqual({ status: "idle" });
+    expect(match.winner).toBeNull();
+    // votingRoundIdは0に戻さない: 直前の試合と同じmatchId(DOルーム)を使い回すため、
+    // 0から採番し直すと観客側のlocalStorage記録と衝突し、次の試合の投票が
+    // 「投票済み」と誤認識されてしまう(RESET_MATCHと同じ理由)。
+    expect(match.votingRoundId).toBe(roundIdBeforeNewMatch);
+  });
+
+  it("allows a fresh START_MATCH after NEW_MATCH", () => {
+    let match = toVoting("red");
+    match = transition(
+      match,
+      {
+        type: "NEW_MATCH",
+        config: CONFIG,
+        red: { name: "赤チーム", members: ["赤1", "赤2", "赤3"] },
+        blue: { name: "青チーム", members: ["青1", "青2", "青3"] },
+        topic: "テストのお題",
+      },
+      20_000,
+    );
+    match = transition(match, { type: "START_MATCH" }, 20_000);
+    expect(match.phase).toBe("initial_writing");
+  });
+});

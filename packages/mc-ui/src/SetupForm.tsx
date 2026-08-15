@@ -4,6 +4,8 @@ import type { CreateMatchRequest } from "@don-oogiri/engine";
 interface SetupFormProps {
   onCreate: (req: CreateMatchRequest) => void;
   isSubmitting: boolean;
+  /** 進行中セッションの途中から次の試合を作る場合に渡す。未指定なら（＝最初の試合作成）キャンセルボタンは出さない。 */
+  onCancel?: () => void;
 }
 
 const LANE_LENGTH = 100;
@@ -19,7 +21,7 @@ function resizeMembers(members: string[], size: number): string[] {
   return Array.from({ length: size }, (_, i) => members[i] ?? "");
 }
 
-export function SetupForm({ onCreate, isSubmitting }: SetupFormProps) {
+export function SetupForm({ onCreate, isSubmitting, onCancel }: SetupFormProps) {
   const [topic, setTopic] = useState("");
   const [teamSize, setTeamSize] = useState<number>(DEFAULT_TEAM_SIZE);
   const [redMembers, setRedMembers] = useState(() => emptyMembers(DEFAULT_TEAM_SIZE));
@@ -114,9 +116,16 @@ export function SetupForm({ onCreate, isSubmitting }: SetupFormProps) {
           />
         </label>
       </fieldset>
-      <button type="submit" disabled={isSubmitting}>
-        {isSubmitting ? "作成中..." : "試合を作成"}
-      </button>
+      <div className="setup-form__actions">
+        <button type="submit" disabled={isSubmitting}>
+          {isSubmitting ? "作成中..." : "試合を作成"}
+        </button>
+        {onCancel && (
+          <button type="button" onClick={onCancel}>
+            キャンセル
+          </button>
+        )}
+      </div>
     </form>
   );
 }

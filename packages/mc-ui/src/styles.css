@@ -242,6 +242,12 @@ button {
   margin-top: 0.5rem;
 }
 
+.setup-form__actions {
+  margin-top: 0.5rem;
+  display: flex;
+  gap: 0.5rem;
+}
+
 .projection {
   max-width: 960px;
   margin: 0 auto;

@@ -1,5 +1,6 @@
 import {
   IllegalTransitionError,
+  type CreateTeamInput,
   type MatchConfig,
   type MatchEvent,
   type MatchState,
@@ -25,12 +26,6 @@ function directionFor(advancingTeam: TeamId): 1 | -1 {
 function advanceSpeed(config: MatchConfig, speedMultiplier: number): number {
   // 中央(laneLength/2)から端まで centerToEdgeMs かかる = 距離/時間
   return (config.laneLength / 2 / config.centerToEdgeMs) * speedMultiplier;
-}
-
-export interface CreateTeamInput {
-  name: string;
-  /** 1〜3人（タイマン〜3人チーム）。 */
-  members: readonly string[];
 }
 
 export function createMatch(
@@ -449,6 +444,20 @@ function applyResetMatch(state: MatchState): MatchState {
   };
 }
 
+/**
+ * 同一セッション(matchId/DOルーム)を維持したまま、新しいチーム・お題で次の試合を始める。
+ * createMatchと違いvotingRoundIdは引き継ぐ（0に戻さない）: RESET_MATCHと同じ理由で、
+ * DO側の投票dedupや観客のlocalStorage記録が直前の試合のラウンド番号を覚えているため、
+ * 0から採番し直すと番号が衝突し、次の試合の投票が「投票済み」と誤認識されてしまう。
+ */
+function applyNewMatch(
+  state: MatchState,
+  event: { config: MatchConfig; red: CreateTeamInput; blue: CreateTeamInput; topic: string },
+): MatchState {
+  const fresh = createMatch(event.config, event.red, event.blue, event.topic);
+  return { ...fresh, votingRoundId: state.votingRoundId };
+}
+
 /** 状態機械の唯一のエントリポイント。不正な遷移は IllegalTransitionError を投げる。 */
 export function transition(
   state: MatchState,
@@ -484,6 +493,8 @@ export function transition(
       return applyCorrectMarkerPosition(current, event.position, now);
     case "RESET_MATCH":
       return applyResetMatch(current);
+    case "NEW_MATCH":
+      return applyNewMatch(current, event);
     default: {
       const _exhaustive: never = event;
       throw new IllegalTransitionError(

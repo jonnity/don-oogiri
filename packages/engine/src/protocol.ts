@@ -2,8 +2,7 @@
  * サーバ(DO)とクライアント(MC操作卓/観客ページ)間で共有するメッセージ形状。
  * WebSocketの配線に依存しない純粋な型定義のみを置く。
  */
-import type { CreateTeamInput } from "./engine.js";
-import type { MatchConfig, MatchEvent, MatchState } from "./types.js";
+import type { CreateTeamInput, MatchConfig, MatchEvent, MatchState } from "./types.js";
 
 export interface CreateMatchRequest {
   config: MatchConfig;

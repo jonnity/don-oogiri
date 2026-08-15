@@ -28,10 +28,13 @@ export function App() {
   const [matchId, setMatchId] = useState<string | null>(() => resolveMatchId());
   const [isCreating, setIsCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
+  /** trueの間は既存セッション(matchId)を保持したまま次の試合のSetupFormを表示する。 */
+  const [isSettingUpNewMatch, setIsSettingUpNewMatch] = useState(false);
   const { state, clockOffset, status, lastError, sendEvent } = useMatchSocket(
     serverUrl ?? "",
     serverUrl ? matchId : null,
   );
+  const showSetupForm = !matchId || isSettingUpNewMatch;
 
   function handleSaveSettings(newServerUrl: string, newAudienceBaseUrl: string) {
     setServerUrl(newServerUrl);
@@ -64,10 +67,41 @@ export function App() {
     void openProjectionWindow({ matchId, serverUrl, audienceBaseUrl });
   }
 
-  /** 明示的な新規試合作成。ここでだけセッション(matchId)を手放し、新しいQRコードに切り替える。 */
+  /**
+   * 既存セッション(matchId/DOルーム/QRコード)は維持したまま、次の試合のチーム・お題を
+   * 入力し直すSetupFormを開く。1イベント内で複数試合をこなす運用で、毎回QRを読ませ直す
+   * 手間を避けるための導線（新しいDOは作らない）。
+   */
   function handleStartNewMatch() {
+    setIsSettingUpNewMatch(true);
+  }
+
+  /** SetupForm送信時。matchId既存時（次の試合）はNEW_MATCHイベントを既存セッションへ送るだけで、新規作成APIは呼ばない。 */
+  function handleSetupSubmit(req: CreateMatchRequest) {
+    if (matchId) {
+      sendEvent({ type: "NEW_MATCH", ...req });
+      setIsSettingUpNewMatch(false);
+      return;
+    }
+    void handleCreate(req);
+  }
+
+  /**
+   * セッション(matchId/QRコード)そのものを破棄し、次に作る試合から新しいQRコードに切り替える。
+   * 通常の「次の試合」はhandleStartNewMatchで同一セッションのまま進めるため、この操作は
+   * イベントを跨ぐ・QRを配り直す等、意図的にセッションを切り替えたい場合だけに使う。
+   */
+  function handleAbandonSession() {
+    if (
+      !confirm(
+        "現在のセッション(QRコード)を破棄して、新しいセッションを開始しますか？\n観客には新しいQRコードを読み直してもらう必要があります。",
+      )
+    ) {
+      return;
+    }
     clearStoredMatchId();
     setMatchId(null);
+    setIsSettingUpNewMatch(false);
   }
 
   if (!serverUrl || !audienceBaseUrl || showSettings) {
@@ -88,7 +122,13 @@ export function App() {
     <main className="app">
       <h1>ドン大喜利 MC操作卓</h1>
 
-      {!matchId && <SetupForm onCreate={handleCreate} isSubmitting={isCreating} />}
+      {showSetupForm && (
+        <SetupForm
+          onCreate={handleSetupSubmit}
+          isSubmitting={isCreating}
+          onCancel={matchId ? () => setIsSettingUpNewMatch(false) : undefined}
+        />
+      )}
       {createError && <p className="error">{createError}</p>}
 
       <p className="connection-status">
@@ -100,20 +140,24 @@ export function App() {
         <>
           <p className="connection-status">
             接続: {status} / matchId: {matchId}{" "}
-            <button onClick={handleStartNewMatch}>新しい試合を作る</button>{" "}
-            <button onClick={handleOpenProjection}>投影画面を開く</button>
+            {!showSetupForm && (
+              <button onClick={handleStartNewMatch}>次の試合を作る</button>
+            )}{" "}
+            <button onClick={handleOpenProjection}>投影画面を開く</button>{" "}
+            <button onClick={handleAbandonSession}>セッションを破棄して新規開始</button>
           </p>
           {lastError && <p className="error">サーバーエラー: {lastError}</p>}
           <AudienceLink matchId={matchId} audienceBaseUrl={audienceBaseUrl} />
-          {state ? (
-            <>
-              <MarkerBar state={state} clockOffset={clockOffset} />
-              <MatchControls state={state} onSend={sendEvent} />
-              <OpsPanel state={state} onSend={sendEvent} />
-            </>
-          ) : (
-            <p>状態を読み込み中...</p>
-          )}
+          {!showSetupForm &&
+            (state ? (
+              <>
+                <MarkerBar state={state} clockOffset={clockOffset} />
+                <MatchControls state={state} onSend={sendEvent} />
+                <OpsPanel state={state} onSend={sendEvent} />
+              </>
+            ) : (
+              <p>状態を読み込み中...</p>
+            ))}
         </>
       )}
     </main>

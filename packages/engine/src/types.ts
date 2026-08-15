@@ -12,6 +12,13 @@ export interface TeamRoster {
   nextRunnerIndex: number;
 }
 
+/** createMatch/NEW_MATCHでチームを登録する際の入力形式。 */
+export interface CreateTeamInput {
+  name: string;
+  /** 1〜3人（タイマン〜3人チーム）。 */
+  members: readonly string[];
+}
+
 export interface MatchConfig {
   /** レーン全長（0 = redの陣地端、laneLength = blueの陣地端、laneLength/2 = 中央） */
   laneLength: number;
@@ -87,7 +94,19 @@ export type MatchEvent =
   | { type: "SET_QR_VISIBLE"; visible: boolean }
   | { type: "SET_SPEED_MULTIPLIER"; multiplier: number }
   | { type: "CORRECT_MARKER_POSITION"; position: number }
-  | { type: "RESET_MATCH" };
+  | { type: "RESET_MATCH" }
+  /**
+   * 同一セッション(matchId/DOルーム/QRコード)を維持したまま、次の試合を新しいチーム・お題で始める。
+   * createMatchと違いDOを作り直さないため、観客に配布済みのQRコードをそのまま使い続けられる
+   * （spec: 1イベント内で複数試合をこなす運用では毎回QRを読ませ直すのは避けたい）。
+   */
+  | {
+      type: "NEW_MATCH";
+      config: MatchConfig;
+      red: CreateTeamInput;
+      blue: CreateTeamInput;
+      topic: string;
+    };
 
 export class IllegalTransitionError extends Error {
   constructor(message: string) {
