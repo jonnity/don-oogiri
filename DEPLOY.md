@@ -4,12 +4,16 @@
 
 ## 現在の本番URL
 
-server・audience-uiはデプロイ済み（2026-08-13）。
+server・audience-uiは独自ドメイン（`jonnity.com`のサブドメイン、Cloudflareゾーン）配下にカスタムドメインを割り当て済み（2026-08-16）。
 
-- サーバ: `https://don-oogiri-server.jonny1996-ty.workers.dev`
-- 観客投票ページ: `https://don-oogiri-audience.pages.dev`
+- サーバ: `https://don-api.jonnity.com`（Workersのカスタムドメイン。`workers.dev`側の`https://don-oogiri-server.jonny1996-ty.workers.dev`も引き続き有効）
+- 観客投票ページ: `https://don-vote.jonnity.com`（Pagesのカスタムドメイン。`pages.dev`側の`https://don-oogiri-audience.pages.dev`も引き続き有効）
 
 以降の`<SERVER_URL>` / `<AUDIENCE_URL>`はこの値。再デプロイ時に値が変わった場合はこの節を更新すること。
+
+カスタムドメインの追加方法:
+- server（Workers）: `wrangler.toml`に`[[routes]]`で`pattern = "<domain>"` / `custom_domain = true`を追加し`wrangler deploy`するとCloudflareが自動でDNS・証明書を用意する（ゾーンが同一Cloudflareアカウント内にある場合）。
+- audience-ui（Pages）: このwranglerバージョン（3.114系）には`wrangler pages domain`系のCLIがないため、Cloudflareダッシュボード（Workers & Pages → 対象プロジェクト → Custom domains）から追加するか、Cloudflare API（`POST /accounts/:account_id/pages/projects/:project/domains`）を叩く。
 
 ## 全体構成
 
@@ -92,7 +96,7 @@ Windowsについては2026-08-13にWindows実機でこのビルドコマンド�
 
 - 手動実行: GitHubリポジトリの Actions タブ → `Build Tauri MC App` → `Run workflow`
 - または`mc-ui-v*`形式のタグをpushすると自動実行（例: `git tag mc-ui-v0.1.0 && git push origin mc-ui-v0.1.0`）
-- `VITE_SERVER_URL` / `VITE_AUDIENCE_URL`はワークフロー実行時の入力（`workflow_dispatch`のinputs）から渡す設計にしてある。値を空のまま実行すると、ビルドされたアプリは初回起動時に接続設定画面での手入力を要求する（`resolveServerUrl`が`null`を返すため）。
+- `VITE_SERVER_URL` / `VITE_AUDIENCE_URL`はワークフロー実行時の入力（`workflow_dispatch`のinputs）から渡す設計。未入力の場合、および`mc-ui-v*`タグpushでの自動起動時（この場合`inputs`自体が空）は、本番既定値（`https://don-api.jonnity.com` / `https://don-vote.jonnity.com`）にフォールバックする（2026-08-16〜）。異なる環境向けにビルドしたい場合のみ`workflow_dispatch`実行時に明示的にURLを入力すること。
 - 成果物はGitHub Releasesのドラフトとしてアップロードされる（`releaseDraft: true`）。ビルド確認後に手動でPublishすること。
 - **一部未検証**: `beforeBuildCommand`によるフロントエンドビルド連動とTauriバンドル自体はLinux上での実ビルドで確認済み（オプションB参照）。ただしこのワークフロー自体（GitHub Actions環境固有のセットアップ）は実行確認できていない。初回実行時にRust/pnpmのバージョン起因で微調整が必要になる可能性がある。
 
