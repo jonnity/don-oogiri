@@ -2,6 +2,7 @@ import { QRCodeSVG } from "qrcode.react";
 import { currentWriters, type TeamId } from "@don-oogiri/engine";
 import { buildAudienceUrl } from "./AudienceLink.js";
 import { MarkerBar } from "./MarkerBar.js";
+import { MatchTimer } from "./MatchTimer.js";
 import { useMatchSocket } from "./useMatchSocket.js";
 
 interface ProjectionViewProps {
@@ -31,6 +32,9 @@ export function ProjectionView({ serverUrl, audienceBaseUrl, matchId }: Projecti
 
   return (
     <main className="projection">
+      <div className="projection__timer">
+        <MatchTimer state={state} clockOffset={clockOffset} />
+      </div>
       <p className="projection__topic">
         <span className="projection__topic-label">お題</span>
         {state.topic}
@@ -48,7 +52,8 @@ export function ProjectionView({ serverUrl, audienceBaseUrl, matchId }: Projecti
       </div>
       {state.phase === "finished" && (
         <p className="projection__winner">
-          🏆 勝者: {state.winner ? state.teams[state.winner].name : "-"}
+          {state.winner ? `🏆 勝者: ${state.teams[state.winner].name}` : "🤝 引き分け"}
+          {state.matchEndReason === "time_limit" && "（時間切れ）"}
         </p>
       )}
       {state.qrVisible && (

@@ -39,6 +39,11 @@ export function createMatch(
       "laneLength and centerToEdgeMs must be positive",
     );
   }
+  if (config.matchTimeLimitMs !== null && config.matchTimeLimitMs <= 0) {
+    throw new IllegalTransitionError(
+      "matchTimeLimitMs must be positive or null",
+    );
+  }
   for (const team of [red, blue]) {
     if (team.members.length < MIN_TEAM_SIZE || team.members.length > MAX_TEAM_SIZE) {
       throw new IllegalTransitionError(
@@ -58,6 +63,8 @@ export function createMatch(
     defendingTeam: null,
     bothWritingFirstDone: false,
     winner: null,
+    matchEndReason: null,
+    matchStartTime: null,
     currentAnswerer: { red: null, blue: null },
     audienceVotes: { red: 0, blue: 0 },
     votingRoundId: 0,
@@ -109,10 +116,80 @@ export function checkArrival(state: MatchState, now: number): MatchState {
       ...state,
       phase: "finished",
       winner: state.advancingTeam,
+      matchEndReason: "arrival",
       movement: { status: "frozen", position },
     };
   }
   return state;
+}
+
+/** 制限時間の満了予定時刻。matchStartTimeが未設定(setup中)か制限時間なしならnull。 */
+export function matchTimeLimitExpiry(state: MatchState): number | null {
+  if (state.matchStartTime === null) return null;
+  if (state.config.matchTimeLimitMs === null) return null;
+  return state.matchStartTime + state.config.matchTimeLimitMs;
+}
+
+/**
+ * 制限時間が満了していれば即finishedにする。「その時点で優勢なチーム」＝満了時刻ちょうどの
+ * マーカー位置が中央よりどちらに寄っているかで判定する（advancingTeamという「直近の勢い」ではなく、
+ * レーン上の実際の占有量を「優勢」とみなす。反転直後、新しい進んでる側がまだ中央を
+ * 超えていない間はこの2つが一致しないため、位置基準を優先する）。
+ * ちょうど中央（＝誰も一度も前進していない試合開始直後）はadvancingTeamにフォールバックし、
+ * それもnullなら引き分け(winner: null)とする。
+ * 判定はnowではなく満了時刻ちょうどの位置で行う: チェックの実行が遅れて呼ばれても
+ * （DOアラームの遅延等）、満了時点で本来止まっていたはずの位置を正しく再現するため。
+ */
+export function checkTimeLimit(state: MatchState, now: number): MatchState {
+  if (state.phase === "finished") return state;
+  const expiry = matchTimeLimitExpiry(state);
+  if (expiry === null || now < expiry) return state;
+  const position = getMarkerPosition(state, expiry);
+  const center = state.config.laneLength / 2;
+  const winner: TeamId | null =
+    position > center ? "red" : position < center ? "blue" : state.advancingTeam;
+  return {
+    ...state,
+    phase: "finished",
+    winner,
+    matchEndReason: "time_limit",
+    movement: { status: "frozen", position },
+  };
+}
+
+/**
+ * 到達判定と制限時間判定をまとめて行う唯一のエントリポイント。両方が満了済みの場合は、
+ * 「先に本来起きていたはずの方」（＝満了予定時刻がより早い方）を採用する。片方の判定で
+ * finishedになった時点でもう片方の予定時刻は意味を失う（マーカーが止まるため）ため、
+ * 両方を独立に適用せず必ずどちらか一方だけを適用する。
+ */
+export function checkTimers(state: MatchState, now: number): MatchState {
+  if (state.phase === "finished") return state;
+  const arrival = nextArrivalTime(state);
+  const expiry = matchTimeLimitExpiry(state);
+  const arrivalDue = arrival !== null && now >= arrival;
+  const expiryDue = expiry !== null && now >= expiry;
+  if (!arrivalDue && !expiryDue) return state;
+  if (expiryDue && (!arrivalDue || expiry! <= arrival!)) {
+    return checkTimeLimit(state, now);
+  }
+  return checkArrival(state, now);
+}
+
+/**
+ * サーバがアラームを仕込むべき次の時刻（到達予定 or 制限時間満了のうち早い方）。両方なければnull。
+ * finished後はnull: matchTimeLimitExpiryはphaseを見ないため、試合終了後もmatchStartTime基準の
+ * 満了時刻（＝すでに過去）を返し続ける。ここでガードしないとDOアラームが過去時刻で
+ * 即座に発火→checkTimersは何もしない(同一参照を返す)→再度syncAlarmが同じ過去時刻を
+ * 設定、を無限に繰り返してしまう。
+ */
+export function nextWakeTime(state: MatchState): number | null {
+  if (state.phase === "finished") return null;
+  const arrival = nextArrivalTime(state);
+  const expiry = matchTimeLimitExpiry(state);
+  if (arrival === null) return expiry;
+  if (expiry === null) return arrival;
+  return Math.min(arrival, expiry);
 }
 
 function startAdvancing(
@@ -135,13 +212,13 @@ function startAdvancing(
   return checkArrival(next, now);
 }
 
-function applyStartMatch(state: MatchState): MatchState {
+function applyStartMatch(state: MatchState, now: number): MatchState {
   if (state.phase !== "setup") {
     throw new IllegalTransitionError(
       `START_MATCH is only valid in 'setup', got '${state.phase}'`,
     );
   }
-  return { ...state, phase: "initial_writing" };
+  return { ...state, phase: "initial_writing", matchStartTime: now };
 }
 
 function applyFirstDone(
@@ -439,6 +516,8 @@ function applyResetMatch(state: MatchState): MatchState {
     defendingTeam: null,
     bothWritingFirstDone: false,
     winner: null,
+    matchEndReason: null,
+    matchStartTime: null,
     currentAnswerer: { red: null, blue: null },
     audienceVotes: { red: 0, blue: 0 },
   };
@@ -464,15 +543,16 @@ export function transition(
   event: MatchEvent,
   now: number,
 ): MatchState {
-  // 前進中の端到達は最優先: 「前進中いつでも、マーカーが相手陣地の端に到達した瞬間に確定（投票を待たない）」
-  // 到達によってfinishedになった場合は、元のイベントより到達確定を優先して即返す。
-  const current = checkArrival(state, now);
+  // 前進中の端到達・制限時間満了は最優先: 「前進中いつでも、マーカーが相手陣地の端に到達した瞬間に確定
+  // （投票を待たない）」「制限時間満了時点でも同様」。これらでfinishedになった場合は、
+  // 元のイベントより確定を優先して即返す。
+  const current = checkTimers(state, now);
   if (current.phase === "finished" && state.phase !== "finished") {
     return current;
   }
   switch (event.type) {
     case "START_MATCH":
-      return applyStartMatch(current);
+      return applyStartMatch(current, now);
     case "FIRST_DONE":
       return applyFirstDone(current, event.team, now);
     case "NOMINATE":

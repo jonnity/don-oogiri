@@ -24,6 +24,8 @@ export interface MatchConfig {
   laneLength: number;
   /** 中央から端まで到達するのにかかる時間（ms）。前進速度はこれで一意に決まる。 */
   centerToEdgeMs: number;
+  /** 試合全体の制限時間（ms）。nullなら制限時間なし。デフォルト5分はUI側で設定する。 */
+  matchTimeLimitMs: number | null;
 }
 
 /** マーカーの動き。サーバ権威: advancing中はstartTime+速度+方向のみを保持し、現在位置はクライアント側で補間する。 */
@@ -60,6 +62,10 @@ export interface MatchState {
   /** initial_writing/tie_writingで最初に書き終えたチームが確定するまでのフラグ。両フェーズで共用する。 */
   bothWritingFirstDone: boolean;
   winner: TeamId | null;
+  /** 試合がどう終了したか（到達 or 制限時間切れ）。finishedでなければnull。 */
+  matchEndReason: "arrival" | "time_limit" | null;
+  /** START_MATCHが呼ばれた時刻（制限時間の起点）。setup中はnull。 */
+  matchStartTime: number | null;
   /**
    * 「今の回答者」＝各チームの現在アクティブな回答（進んでる側の現チャンピオン回答、または
    * 阻止する側の直近の挑戦回答）を書いたメンバー名。FIRST_DONE/NOMINATEで更新される。

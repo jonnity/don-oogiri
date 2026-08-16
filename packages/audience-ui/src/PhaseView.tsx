@@ -20,7 +20,8 @@ export function PhaseView({ state, matchId, lastVoteAck, onVote }: PhaseViewProp
     return (
       <div className="phase-view">
         <p className="winner-banner">
-          🏆 {state.winner ? teamLabel(state, state.winner) : "-"} の勝ち！
+          {state.winner ? `🏆 ${teamLabel(state, state.winner)} の勝ち！` : "🤝 引き分け"}
+          {state.matchEndReason === "time_limit" && "（時間切れ）"}
         </p>
       </div>
     );

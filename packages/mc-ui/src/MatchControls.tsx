@@ -43,7 +43,8 @@ export function MatchControls({ state, onSend }: MatchControlsProps) {
 
       {state.phase === "finished" && (
         <p className="winner-banner">
-          🏆 勝者: {state.winner ? teamLabel(state, state.winner) : "-"}
+          {state.winner ? `🏆 勝者: ${teamLabel(state, state.winner)}` : "🤝 引き分け"}
+          {state.matchEndReason === "time_limit" && "（時間切れ）"}
         </p>
       )}
     </div>

@@ -1,8 +1,8 @@
 import {
-  checkArrival,
+  checkTimers,
   createMatch,
   IllegalTransitionError,
-  nextArrivalTime,
+  nextWakeTime,
   transition,
   type ClientMessage,
   type CreateMatchRequest,
@@ -29,6 +29,11 @@ function normalizeMatch(match: MatchState): MatchState {
     speedMultiplier: match.speedMultiplier ?? 1,
     bothWritingFirstDone: match.bothWritingFirstDone ?? legacy.initialFirstDone ?? false,
     currentAnswerer: match.currentAnswerer ?? { red: null, blue: null },
+    // 制限時間はこのバージョンで追加されたフィールド。旧データはnull(制限時間なし/未開始)で
+    // 補う。300000のような既定値で埋めると、進行中の旧試合が復元直後に強制終了しかねない。
+    matchStartTime: match.matchStartTime ?? null,
+    matchEndReason: match.matchEndReason ?? null,
+    config: { ...match.config, matchTimeLimitMs: match.config.matchTimeLimitMs ?? null },
   };
 }
 
@@ -62,11 +67,11 @@ export class MatchRoom implements DurableObject {
   }
 
   private async syncAlarm(match: MatchState): Promise<void> {
-    const arrivalTime = nextArrivalTime(match);
-    if (arrivalTime === null) {
+    const wakeTime = nextWakeTime(match);
+    if (wakeTime === null) {
       await this.state.storage.deleteAlarm();
     } else {
-      await this.state.storage.setAlarm(arrivalTime);
+      await this.state.storage.setAlarm(wakeTime);
     }
   }
 
@@ -247,11 +252,11 @@ export class MatchRoom implements DurableObject {
   async alarm(): Promise<void> {
     await this.load();
     if (!this.match) return;
-    const next = checkArrival(this.match, Date.now());
+    const next = checkTimers(this.match, Date.now());
     if (next !== this.match) {
       await this.save(next);
     } else {
-      // 端に未到達なら次の到達予定時刻へアラームを再設定する
+      // 未到達・未満了なら次の到達/満了予定時刻へアラームを再設定する
       await this.syncAlarm(this.match);
     }
   }

@@ -12,6 +12,7 @@ const LANE_LENGTH = 100;
 const DEFAULT_EDGE_TO_EDGE_SECONDS = 60;
 const DEFAULT_TEAM_SIZE = 3;
 const TEAM_SIZE_OPTIONS = [1, 2, 3] as const;
+const DEFAULT_MATCH_TIME_LIMIT_MINUTES = 5;
 
 function emptyMembers(size: number): string[] {
   return Array.from({ length: size }, () => "");
@@ -28,6 +29,10 @@ export function SetupForm({ onCreate, isSubmitting, onCancel }: SetupFormProps) 
   const [blueMembers, setBlueMembers] = useState(() => emptyMembers(DEFAULT_TEAM_SIZE));
   const [edgeToEdgeSeconds, setEdgeToEdgeSeconds] = useState(
     DEFAULT_EDGE_TO_EDGE_SECONDS,
+  );
+  const [timeLimitEnabled, setTimeLimitEnabled] = useState(true);
+  const [matchTimeLimitMinutes, setMatchTimeLimitMinutes] = useState(
+    DEFAULT_MATCH_TIME_LIMIT_MINUTES,
   );
 
   function handleTeamSizeChange(size: number) {
@@ -51,10 +56,15 @@ export function SetupForm({ onCreate, isSubmitting, onCancel }: SetupFormProps) 
       alert("到達時間は1秒以上で入力してください");
       return;
     }
+    if (timeLimitEnabled && matchTimeLimitMinutes <= 0) {
+      alert("制限時間は1分以上で入力してください");
+      return;
+    }
     onCreate({
       config: {
         laneLength: LANE_LENGTH,
         centerToEdgeMs: (edgeToEdgeSeconds * 1000) / 2,
+        matchTimeLimitMs: timeLimitEnabled ? matchTimeLimitMinutes * 60 * 1000 : null,
       },
       red: { name: "赤", members: redMembers },
       blue: { name: "青", members: blueMembers },
@@ -113,6 +123,27 @@ export function SetupForm({ onCreate, isSubmitting, onCancel }: SetupFormProps) 
             value={edgeToEdgeSeconds}
             min={1}
             onChange={(e) => setEdgeToEdgeSeconds(Number(e.target.value))}
+          />
+        </label>
+      </fieldset>
+      <fieldset>
+        <legend>試合全体の制限時間</legend>
+        <label className="checkbox-label">
+          <input
+            type="checkbox"
+            checked={timeLimitEnabled}
+            onChange={(e) => setTimeLimitEnabled(e.target.checked)}
+          />
+          制限時間を設ける
+        </label>
+        <label>
+          制限時間(分)。終了時点で優勢な方の勝ち
+          <input
+            type="number"
+            value={matchTimeLimitMinutes}
+            min={1}
+            disabled={!timeLimitEnabled}
+            onChange={(e) => setMatchTimeLimitMinutes(Number(e.target.value))}
           />
         </label>
       </fieldset>

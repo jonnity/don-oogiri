@@ -5,6 +5,7 @@ import { createMatch } from "./api.js";
 import { ConnectionSettings } from "./ConnectionSettings.js";
 import { MarkerBar } from "./MarkerBar.js";
 import { MatchControls } from "./MatchControls.js";
+import { MatchTimer } from "./MatchTimer.js";
 import { OpsPanel } from "./OpsPanel.js";
 import { openProjectionWindow } from "./projectionWindow.js";
 import {
@@ -152,6 +153,7 @@ export function App() {
             (state ? (
               <>
                 <MarkerBar state={state} clockOffset={clockOffset} />
+                <MatchTimer state={state} clockOffset={clockOffset} />
                 <MatchControls state={state} onSend={sendEvent} />
                 <OpsPanel state={state} onSend={sendEvent} />
               </>

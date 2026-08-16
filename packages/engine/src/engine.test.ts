@@ -1,15 +1,18 @@
 import { describe, expect, it } from "vitest";
 import {
+  checkTimeLimit,
   createMatch,
   currentWriter,
   currentWriters,
   getMarkerPosition,
+  matchTimeLimitExpiry,
   nextArrivalTime,
+  nextWakeTime,
   transition,
 } from "./engine.js";
 import { IllegalTransitionError, type MatchState } from "./types.js";
 
-const CONFIG = { laneLength: 100, centerToEdgeMs: 90_000 };
+const CONFIG = { laneLength: 100, centerToEdgeMs: 90_000, matchTimeLimitMs: null };
 
 function newMatch(): MatchState {
   return createMatch(
@@ -31,7 +34,18 @@ describe("createMatch", () => {
   it("rejects non-positive config", () => {
     expect(() =>
       createMatch(
-        { laneLength: 0, centerToEdgeMs: 1000 },
+        { laneLength: 0, centerToEdgeMs: 1000, matchTimeLimitMs: null },
+        { name: "赤", members: ["a", "b", "c"] },
+        { name: "青", members: ["d", "e", "f"] },
+        "お題",
+      ),
+    ).toThrow(IllegalTransitionError);
+  });
+
+  it("rejects a non-positive matchTimeLimitMs", () => {
+    expect(() =>
+      createMatch(
+        { laneLength: 100, centerToEdgeMs: 1000, matchTimeLimitMs: 0 },
         { name: "赤", members: ["a", "b", "c"] },
         { name: "青", members: ["d", "e", "f"] },
         "お題",
@@ -649,7 +663,7 @@ describe("NEW_MATCH", () => {
     const roundIdBeforeNewMatch = match.votingRoundId;
     expect(roundIdBeforeNewMatch).toBeGreaterThan(0);
 
-    const newConfig = { laneLength: 100, centerToEdgeMs: 30_000 };
+    const newConfig = { laneLength: 100, centerToEdgeMs: 30_000, matchTimeLimitMs: null };
     match = transition(
       match,
       {
@@ -691,5 +705,227 @@ describe("NEW_MATCH", () => {
     );
     match = transition(match, { type: "START_MATCH" }, 20_000);
     expect(match.phase).toBe("initial_writing");
+  });
+});
+
+function newTlMatch(matchTimeLimitMs: number): MatchState {
+  return createMatch(
+    { laneLength: 100, centerToEdgeMs: 90_000, matchTimeLimitMs },
+    { name: "赤チーム", members: ["赤1"] },
+    { name: "青チーム", members: ["青1"] },
+    "テストのお題",
+  );
+}
+
+describe("match time limit", () => {
+  it("declares red the winner when, at expiry, the marker sits past center on red's side", () => {
+    let match = newTlMatch(20_000);
+    match = transition(match, { type: "START_MATCH" }, 0);
+    match = transition(match, { type: "FIRST_DONE", team: "red" }, 0);
+    // speed = 50/90000 per ms; at t=20000 position = 50 + 20000*(50/90000) ≈ 61.11 (> center)
+    const finished = transition(match, { type: "NOMINATE" }, 20_000);
+    expect(finished.phase).toBe("finished");
+    expect(finished.winner).toBe("red");
+    expect(finished.matchEndReason).toBe("time_limit");
+    expect(finished.movement.status).toBe("frozen");
+  });
+
+  it("declares blue the winner when, at expiry, the marker sits past center on blue's side", () => {
+    let match = newTlMatch(20_000);
+    match = transition(match, { type: "START_MATCH" }, 0);
+    match = transition(match, { type: "FIRST_DONE", team: "blue" }, 0);
+    const finished = transition(match, { type: "NOMINATE" }, 20_000);
+    expect(finished.phase).toBe("finished");
+    expect(finished.winner).toBe("blue");
+    expect(finished.matchEndReason).toBe("time_limit");
+  });
+
+  it("still resolves by marker position when the time limit expires mid-voting (frozen marker)", () => {
+    let match = newTlMatch(10_000);
+    match = transition(match, { type: "START_MATCH" }, 0);
+    match = transition(match, { type: "FIRST_DONE", team: "red" }, 0);
+    match = transition(match, { type: "NOMINATE" }, 9_000); // freezes at 50 + 9000*(50/90000) = 55
+    expect(match.phase).toBe("voting");
+    const finished = transition(match, { type: "CLOSE_VOTING" }, 10_000);
+    expect(finished.phase).toBe("finished");
+    expect(finished.winner).toBe("red");
+    expect(finished.matchEndReason).toBe("time_limit");
+    expect(finished.movement).toEqual({ status: "frozen", position: 55 });
+  });
+
+  it("credits the side occupying more of the lane, not the currently-advancing side, right after a reversal", () => {
+    let match = newTlMatch(10_000);
+    match = transition(match, { type: "START_MATCH" }, 0);
+    match = transition(match, { type: "FIRST_DONE", team: "red" }, 0);
+    match = transition(match, { type: "NOMINATE" }, 9_000); // frozen at 55
+    // blue wins the vote (reversal): blue becomes advancingTeam, resuming from 55 toward 0
+    match = transition(match, { type: "VOTE_RESULT", redVotes: 1, blueVotes: 9 }, 9_000);
+    expect(match.advancingTeam).toBe("blue");
+    expect(match.movement).toMatchObject({
+      status: "advancing",
+      startPosition: 55,
+      startTime: 9_000,
+      direction: -1,
+    });
+
+    // by t=10_000 (the time limit) blue has only pulled the marker back to ~54.44 — still on
+    // red's side of center — so red should win even though blue is the one "advancing".
+    const finished = transition(match, { type: "NOMINATE" }, 10_000);
+    expect(finished.phase).toBe("finished");
+    expect(finished.matchEndReason).toBe("time_limit");
+    expect(finished.winner).toBe("red");
+  });
+
+  it("falls back to the currently-advancing team when the marker sits exactly at center at expiry", () => {
+    let match = newTlMatch(1_000);
+    match = transition(match, { type: "START_MATCH" }, 0);
+    match = transition(match, { type: "FIRST_DONE", team: "red" }, 0);
+    // NOMINATE at the same instant as FIRST_DONE freezes the marker at exactly center (50),
+    // while advancingTeam is still "red" from FIRST_DONE.
+    match = transition(match, { type: "NOMINATE" }, 0);
+    expect(match.movement).toEqual({ status: "frozen", position: 50 });
+    expect(match.advancingTeam).toBe("red");
+
+    const finished = transition(match, { type: "CLOSE_VOTING" }, 1_000);
+    expect(finished.phase).toBe("finished");
+    expect(finished.matchEndReason).toBe("time_limit");
+    expect(finished.winner).toBe("red");
+  });
+
+  it("ends in a draw when the time limit expires before anyone has ever taken the lead", () => {
+    let match = newTlMatch(1_000);
+    match = transition(match, { type: "START_MATCH" }, 0);
+    expect(match.advancingTeam).toBeNull();
+    const finished = transition(match, { type: "SET_TOPIC", topic: "確認" }, 1_000);
+    expect(finished.phase).toBe("finished");
+    expect(finished.winner).toBeNull();
+    expect(finished.matchEndReason).toBe("time_limit");
+  });
+
+  it("discards the triggering event once time is up instead of applying it", () => {
+    let match = newTlMatch(5_000);
+    match = transition(match, { type: "START_MATCH" }, 0);
+    match = transition(match, { type: "FIRST_DONE", team: "red" }, 0);
+    // VOTE_RESULT would normally throw here (phase is initial_writing, not voting) — but the
+    // time limit has already expired, so the match finishes before the event is evaluated.
+    const finished = transition(match, { type: "VOTE_RESULT", redVotes: 1, blueVotes: 0 }, 5_000);
+    expect(finished.phase).toBe("finished");
+    expect(finished.matchEndReason).toBe("time_limit");
+  });
+
+  it("freezes the marker at its position at the expiry instant, not at the (possibly later) time the check actually runs", () => {
+    let match = newTlMatch(10_000);
+    match = transition(match, { type: "START_MATCH" }, 0);
+    match = transition(match, { type: "FIRST_DONE", team: "red" }, 0);
+    // simulate a delayed check (e.g. a late DO alarm): now is far past the actual expiry
+    const finished = transition(match, { type: "NOMINATE" }, 50_000);
+    const expectedPositionAtExpiry = 50 + (50 / 90_000) * 10_000;
+    expect(finished.movement).toMatchObject({
+      status: "frozen",
+      position: expectedPositionAtExpiry,
+    });
+  });
+
+  it("clears matchStartTime and matchEndReason on RESET_MATCH, and restarts the clock on the next START_MATCH", () => {
+    let match = newTlMatch(5_000);
+    match = transition(match, { type: "START_MATCH" }, 0);
+    match = transition(match, { type: "FIRST_DONE", team: "red" }, 0);
+    match = transition(match, { type: "RESET_MATCH" }, 100);
+    expect(match.matchStartTime).toBeNull();
+    expect(match.matchEndReason).toBeNull();
+
+    match = transition(match, { type: "START_MATCH" }, 9_000);
+    expect(match.matchStartTime).toBe(9_000);
+    expect(matchTimeLimitExpiry(match)).toBe(14_000);
+  });
+
+  it("resets matchStartTime and matchEndReason for the fresh match on NEW_MATCH", () => {
+    let match = newTlMatch(5_000);
+    match = transition(match, { type: "START_MATCH" }, 0);
+    match = transition(match, { type: "FIRST_DONE", team: "red" }, 0);
+    match = transition(
+      match,
+      {
+        type: "NEW_MATCH",
+        config: { laneLength: 100, centerToEdgeMs: 90_000, matchTimeLimitMs: 5_000 },
+        red: { name: "新赤", members: ["a"] },
+        blue: { name: "新青", members: ["b"] },
+        topic: "次のお題",
+      },
+      100,
+    );
+    expect(match.matchStartTime).toBeNull();
+    expect(match.matchEndReason).toBeNull();
+  });
+});
+
+describe("checkTimeLimit", () => {
+  it("is a no-op (same reference) before the deadline", () => {
+    let match = newTlMatch(5_000);
+    match = transition(match, { type: "START_MATCH" }, 0);
+    match = transition(match, { type: "FIRST_DONE", team: "red" }, 0);
+    const unchanged = checkTimeLimit(match, 4_999);
+    expect(unchanged).toBe(match);
+  });
+});
+
+describe("matchTimeLimitExpiry", () => {
+  it("is null before the match starts, and null when there is no configured time limit", () => {
+    expect(matchTimeLimitExpiry(newTlMatch(5_000))).toBeNull(); // still in setup
+
+    const started = transition(newMatch(), { type: "START_MATCH" }, 0); // CONFIG has matchTimeLimitMs: null
+    expect(matchTimeLimitExpiry(started)).toBeNull();
+  });
+
+  it("is matchStartTime + matchTimeLimitMs once the match has started", () => {
+    let match = newTlMatch(5_000);
+    match = transition(match, { type: "START_MATCH" }, 1_000);
+    expect(matchTimeLimitExpiry(match)).toBe(6_000);
+  });
+});
+
+describe("nextWakeTime", () => {
+  it("returns the earlier of nextArrivalTime and matchTimeLimitExpiry", () => {
+    let match = newTlMatch(200_000); // time limit far later than arrival at the edge (~90s)
+    match = transition(match, { type: "START_MATCH" }, 0);
+    match = transition(match, { type: "FIRST_DONE", team: "red" }, 0);
+    const arrival = nextArrivalTime(match)!;
+    const expiry = matchTimeLimitExpiry(match)!;
+    expect(arrival).toBeLessThan(expiry);
+    expect(nextWakeTime(match)).toBe(arrival);
+  });
+
+  it("returns the time limit expiry when it is earlier than the arrival estimate", () => {
+    let match = newTlMatch(1_000); // time limit far earlier than arrival at the edge (~90s)
+    match = transition(match, { type: "START_MATCH" }, 0);
+    match = transition(match, { type: "FIRST_DONE", team: "red" }, 0);
+    expect(nextWakeTime(match)).toBe(matchTimeLimitExpiry(match));
+  });
+
+  it("returns null when neither a marker arrival nor a time limit is pending", () => {
+    const idleMatch = newTlMatch(5_000); // setup: no matchStartTime yet, movement idle
+    expect(nextWakeTime(idleMatch)).toBeNull();
+  });
+
+  it("returns null once the match has finished via the time limit (no alarm re-arm loop)", () => {
+    let match = newTlMatch(5_000);
+    match = transition(match, { type: "START_MATCH" }, 0);
+    match = transition(match, { type: "FIRST_DONE", team: "red" }, 0);
+    match = transition(match, { type: "NOMINATE" }, 5_000);
+    expect(match.phase).toBe("finished");
+    // matchTimeLimitExpiry is phase-agnostic and would keep returning a (now past) timestamp;
+    // nextWakeTime must guard on phase itself or the server would re-arm a past-due alarm forever.
+    expect(matchTimeLimitExpiry(match)).not.toBeNull();
+    expect(nextWakeTime(match)).toBeNull();
+  });
+
+  it("returns null once the match has finished via marker arrival while a time limit was configured", () => {
+    let match = newTlMatch(200_000); // time limit far later than arrival at the edge (~90s)
+    match = transition(match, { type: "START_MATCH" }, 0);
+    match = transition(match, { type: "FIRST_DONE", team: "red" }, 0);
+    match = transition(match, { type: "NOMINATE" }, 90_000); // reaches the edge (100)
+    expect(match.phase).toBe("finished");
+    expect(match.matchEndReason).toBe("arrival");
+    expect(nextWakeTime(match)).toBeNull();
   });
 });
