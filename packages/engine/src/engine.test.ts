@@ -1,11 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
-  checkTimeLimit,
   createMatch,
   currentWriter,
   currentWriters,
   getMarkerPosition,
-  matchTimeLimitExpiry,
+  matchTimeLimitRemainingMs,
   nextArrivalTime,
   nextWakeTime,
   transition,
@@ -718,128 +717,109 @@ function newTlMatch(matchTimeLimitMs: number): MatchState {
 }
 
 describe("match time limit", () => {
-  it("declares red the winner when, at expiry, the marker sits past center on red's side", () => {
+  it("grants a last answer past expiry (NOMINATE always succeeds), then finishes once the following vote confirms a stable leader", () => {
     let match = newTlMatch(20_000);
     match = transition(match, { type: "START_MATCH" }, 0);
     match = transition(match, { type: "FIRST_DONE", team: "red" }, 0);
-    // speed = 50/90000 per ms; at t=20000 position = 50 + 20000*(50/90000) ≈ 61.11 (> center)
-    const finished = transition(match, { type: "NOMINATE" }, 20_000);
+    // speed = 50/90000 per ms; at t=20000 position = 50 + 20000*(50/90000) ≈ 61.11 (budget already exhausted)
+    match = transition(match, { type: "NOMINATE" }, 20_000);
+    expect(match.phase).toBe("voting"); // NOMINATE was honored despite time being up ("last answer")
+
+    // red (already the lane leader) wins the vote outright: no reversal, stable state, so this is
+    // the checkpoint where the exhausted budget is finally acted on.
+    const finished = transition(match, { type: "VOTE_RESULT", redVotes: 5, blueVotes: 1 }, 20_000);
     expect(finished.phase).toBe("finished");
     expect(finished.winner).toBe("red");
     expect(finished.matchEndReason).toBe("time_limit");
     expect(finished.movement.status).toBe("frozen");
   });
 
-  it("declares blue the winner when, at expiry, the marker sits past center on blue's side", () => {
-    let match = newTlMatch(20_000);
-    match = transition(match, { type: "START_MATCH" }, 0);
-    match = transition(match, { type: "FIRST_DONE", team: "blue" }, 0);
-    const finished = transition(match, { type: "NOMINATE" }, 20_000);
-    expect(finished.phase).toBe("finished");
-    expect(finished.winner).toBe("blue");
-    expect(finished.matchEndReason).toBe("time_limit");
-  });
-
-  it("still resolves by marker position when the time limit expires mid-voting (frozen marker)", () => {
-    let match = newTlMatch(10_000);
-    match = transition(match, { type: "START_MATCH" }, 0);
-    match = transition(match, { type: "FIRST_DONE", team: "red" }, 0);
-    match = transition(match, { type: "NOMINATE" }, 9_000); // freezes at 50 + 9000*(50/90000) = 55
-    expect(match.phase).toBe("voting");
-    const finished = transition(match, { type: "CLOSE_VOTING" }, 10_000);
-    expect(finished.phase).toBe("finished");
-    expect(finished.winner).toBe("red");
-    expect(finished.matchEndReason).toBe("time_limit");
-    expect(finished.movement).toEqual({ status: "frozen", position: 55 });
-  });
-
-  it("credits the side occupying more of the lane, not the currently-advancing side, right after a reversal", () => {
-    let match = newTlMatch(10_000);
-    match = transition(match, { type: "START_MATCH" }, 0);
-    match = transition(match, { type: "FIRST_DONE", team: "red" }, 0);
-    match = transition(match, { type: "NOMINATE" }, 9_000); // frozen at 55
-    // blue wins the vote (reversal): blue becomes advancingTeam, resuming from 55 toward 0
-    match = transition(match, { type: "VOTE_RESULT", redVotes: 1, blueVotes: 9 }, 9_000);
-    expect(match.advancingTeam).toBe("blue");
-    expect(match.movement).toMatchObject({
-      status: "advancing",
-      startPosition: 55,
-      startTime: 9_000,
-      direction: -1,
-    });
-
-    // by t=10_000 (the time limit) blue has only pulled the marker back to ~54.44 — still on
-    // red's side of center — so red should win even though blue is the one "advancing".
-    const finished = transition(match, { type: "NOMINATE" }, 10_000);
-    expect(finished.phase).toBe("finished");
-    expect(finished.matchEndReason).toBe("time_limit");
-    expect(finished.winner).toBe("red");
-  });
-
-  it("falls back to the currently-advancing team when the marker sits exactly at center at expiry", () => {
-    let match = newTlMatch(1_000);
-    match = transition(match, { type: "START_MATCH" }, 0);
-    match = transition(match, { type: "FIRST_DONE", team: "red" }, 0);
-    // NOMINATE at the same instant as FIRST_DONE freezes the marker at exactly center (50),
-    // while advancingTeam is still "red" from FIRST_DONE.
-    match = transition(match, { type: "NOMINATE" }, 0);
-    expect(match.movement).toEqual({ status: "frozen", position: 50 });
-    expect(match.advancingTeam).toBe("red");
-
-    const finished = transition(match, { type: "CLOSE_VOTING" }, 1_000);
-    expect(finished.phase).toBe("finished");
-    expect(finished.matchEndReason).toBe("time_limit");
-    expect(finished.winner).toBe("red");
-  });
-
-  it("ends in a draw when the time limit expires before anyone has ever taken the lead", () => {
-    let match = newTlMatch(1_000);
-    match = transition(match, { type: "START_MATCH" }, 0);
-    expect(match.advancingTeam).toBeNull();
-    const finished = transition(match, { type: "SET_TOPIC", topic: "確認" }, 1_000);
-    expect(finished.phase).toBe("finished");
-    expect(finished.winner).toBeNull();
-    expect(finished.matchEndReason).toBe("time_limit");
-  });
-
-  it("discards the triggering event once time is up instead of applying it", () => {
+  it("resolves correctly even after a very long voting deliberation, since voting itself never consumes budget", () => {
     let match = newTlMatch(5_000);
     match = transition(match, { type: "START_MATCH" }, 0);
     match = transition(match, { type: "FIRST_DONE", team: "red" }, 0);
-    // VOTE_RESULT would normally throw here (phase is initial_writing, not voting) — but the
-    // time limit has already expired, so the match finishes before the event is evaluated.
-    const finished = transition(match, { type: "VOTE_RESULT", redVotes: 1, blueVotes: 0 }, 5_000);
+    match = transition(match, { type: "NOMINATE" }, 5_000); // exhausts the budget exactly, freezes at 52.78
+    expect(match.phase).toBe("voting");
+    // a long audience deliberation before CLOSE_VOTING must not matter: voting doesn't consume budget
+    const finished = transition(match, { type: "CLOSE_VOTING" }, 999_000);
     expect(finished.phase).toBe("finished");
     expect(finished.matchEndReason).toBe("time_limit");
   });
 
-  it("freezes the marker at its position at the expiry instant, not at the (possibly later) time the check actually runs", () => {
+  it("continues in sudden death across multiple rounds while the trailing side is the one advancing, then finishes once they cross back into the lead", () => {
     let match = newTlMatch(10_000);
     match = transition(match, { type: "START_MATCH" }, 0);
     match = transition(match, { type: "FIRST_DONE", team: "red" }, 0);
-    // simulate a delayed check (e.g. a late DO alarm): now is far past the actual expiry
-    const finished = transition(match, { type: "NOMINATE" }, 50_000);
-    const expectedPositionAtExpiry = 50 + (50 / 90_000) * 10_000;
-    expect(finished.movement).toMatchObject({
-      status: "frozen",
-      position: expectedPositionAtExpiry,
-    });
+    match = transition(match, { type: "NOMINATE" }, 9_000); // frozen at 55, budget not yet exhausted (1000ms left)
+
+    // blue wins the vote (reversal): blue becomes advancingTeam, resuming from 55 toward 0.
+    // Not exhausted yet, so this round doesn't even reach the stability check.
+    match = transition(match, { type: "VOTE_RESULT", redVotes: 1, blueVotes: 9 }, 9_000);
+    expect(match.phase).toBe("challenge_writing");
+    expect(match.advancingTeam).toBe("blue");
+
+    // by t=10_000 blue has only pulled the marker back to ~54.44 — still on red's side of
+    // center — and budget is now exhausted exactly here. red's next writer nominates
+    // (last answer, always allowed) and loses the vote too: blue keeps pushing, still a comeback.
+    match = transition(match, { type: "NOMINATE" }, 10_000); // frozen at 54.44
+    expect(match.phase).toBe("voting");
+    match = transition(match, { type: "VOTE_RESULT", redVotes: 1, blueVotes: 5 }, 10_000);
+    expect(match.phase).toBe("challenge_writing"); // not finished: blue is still lane-behind red
+    expect(match.advancingTeam).toBe("blue");
+
+    // blue keeps pushing and eventually crosses center (at t≈18_000). red's writer nominates
+    // again once blue has clearly taken the lead (t=20_000, position ≈48.89) and loses again:
+    // blue is now both advancing AND the lane leader — stable — so this is where it finally ends.
+    match = transition(match, { type: "NOMINATE" }, 20_000);
+    expect(match.phase).toBe("voting");
+    const finished = transition(match, { type: "VOTE_RESULT", redVotes: 1, blueVotes: 5 }, 20_000);
+    expect(finished.phase).toBe("finished");
+    expect(finished.matchEndReason).toBe("time_limit");
+    expect(finished.winner).toBe("blue");
   });
 
-  it("clears matchStartTime and matchEndReason on RESET_MATCH, and restarts the clock on the next START_MATCH", () => {
+  it("finishes immediately on an exhausted tie, crediting whichever side occupies more of the lane (nobody is actively contesting it)", () => {
+    let match = newTlMatch(5_000);
+    match = transition(match, { type: "START_MATCH" }, 0);
+    match = transition(match, { type: "FIRST_DONE", team: "red" }, 0);
+    match = transition(match, { type: "NOMINATE" }, 6_000); // frozen at 53.33, budget exhausted
+    const finished = transition(match, { type: "VOTE_RESULT", redVotes: 3, blueVotes: 3 }, 6_000);
+    expect(finished.phase).toBe("finished");
+    expect(finished.matchEndReason).toBe("time_limit");
+    expect(finished.winner).toBe("red");
+    expect(finished.movement).toMatchObject({ status: "frozen" });
+  });
+
+  it("still lets arrival decide unconditionally, even mid sudden-death with an exhausted budget", () => {
+    let match = newTlMatch(1_000);
+    match = transition(match, { type: "START_MATCH" }, 0);
+    match = transition(match, { type: "FIRST_DONE", team: "red" }, 0);
+    match = transition(match, { type: "NOMINATE" }, 9_000); // frozen at 55, well past the 1000ms budget
+    // blue wins the vote (reversal), still a comeback (55 > center) so time_limit doesn't fire here
+    match = transition(match, { type: "VOTE_RESULT", redVotes: 1, blueVotes: 9 }, 9_000);
+    expect(match.phase).toBe("challenge_writing");
+    // left untouched, blue's push eventually reaches the far edge (0) — arrival always wins outright
+    const finished = transition(match, { type: "SET_TOPIC", topic: "確認" }, 9_000 + 55 * 1_800);
+    expect(finished.phase).toBe("finished");
+    expect(finished.matchEndReason).toBe("arrival");
+    expect(finished.winner).toBe("blue");
+  });
+
+  it("clears matchStartTime, matchEndReason and the consumed budget on RESET_MATCH, and restarts the clock on the next START_MATCH", () => {
     let match = newTlMatch(5_000);
     match = transition(match, { type: "START_MATCH" }, 0);
     match = transition(match, { type: "FIRST_DONE", team: "red" }, 0);
     match = transition(match, { type: "RESET_MATCH" }, 100);
     expect(match.matchStartTime).toBeNull();
     expect(match.matchEndReason).toBeNull();
+    expect(match.timeLimitElapsedMs).toBe(0);
 
     match = transition(match, { type: "START_MATCH" }, 9_000);
     expect(match.matchStartTime).toBe(9_000);
-    expect(matchTimeLimitExpiry(match)).toBe(14_000);
+    expect(matchTimeLimitRemainingMs(match, 9_000)).toBe(5_000);
   });
 
-  it("resets matchStartTime and matchEndReason for the fresh match on NEW_MATCH", () => {
+  it("resets matchStartTime, matchEndReason and the consumed budget for the fresh match on NEW_MATCH", () => {
     let match = newTlMatch(5_000);
     match = transition(match, { type: "START_MATCH" }, 0);
     match = transition(match, { type: "FIRST_DONE", team: "red" }, 0);
@@ -856,67 +836,93 @@ describe("match time limit", () => {
     );
     expect(match.matchStartTime).toBeNull();
     expect(match.matchEndReason).toBeNull();
+    expect(matchTimeLimitRemainingMs(match, 100)).toBe(5_000);
   });
 });
 
-describe("checkTimeLimit", () => {
-  it("is a no-op (same reference) before the deadline", () => {
+describe("time limit budget survives startTime rebases", () => {
+  it("SET_SPEED_MULTIPLIER folds the in-flight advancing segment instead of refunding it", () => {
+    let match = newTlMatch(20_000);
+    match = transition(match, { type: "START_MATCH" }, 0);
+    match = transition(match, { type: "FIRST_DONE", team: "red" }, 0);
+    expect(matchTimeLimitRemainingMs(match, 10_000)).toBe(10_000); // 10s consumed so far
+
+    match = transition(match, { type: "SET_SPEED_MULTIPLIER", multiplier: 5 }, 10_000);
+    // immediately after the rebase, the consumed total must be unchanged (not reset to 0)
+    expect(matchTimeLimitRemainingMs(match, 10_000)).toBe(10_000);
+    // 2s further after the rebase: 10s (pre-rebase) + 2s (post-rebase) = 12s consumed, 8s left —
+    // NOT 18s left, which is what an unfolded rebase would silently refund.
+    expect(matchTimeLimitRemainingMs(match, 12_000)).toBe(8_000);
+  });
+
+  it("CORRECT_MARKER_POSITION folds the in-flight advancing segment instead of refunding it", () => {
+    let match = newTlMatch(20_000);
+    match = transition(match, { type: "START_MATCH" }, 0);
+    match = transition(match, { type: "FIRST_DONE", team: "red" }, 0);
+    match = transition(match, { type: "CORRECT_MARKER_POSITION", position: 80 }, 7_000);
+    expect(matchTimeLimitRemainingMs(match, 7_000)).toBe(13_000);
+    expect(matchTimeLimitRemainingMs(match, 9_000)).toBe(11_000);
+  });
+});
+
+describe("matchTimeLimitRemainingMs", () => {
+  it("is null when there is no configured time limit", () => {
+    const started = transition(newMatch(), { type: "START_MATCH" }, 0); // CONFIG has matchTimeLimitMs: null
+    expect(matchTimeLimitRemainingMs(started, 100)).toBeNull();
+  });
+
+  it("is the full budget, statically, before the match starts", () => {
+    const match = newTlMatch(5_000); // still in setup
+    expect(matchTimeLimitRemainingMs(match, 0)).toBe(5_000);
+    expect(matchTimeLimitRemainingMs(match, 999_999)).toBe(5_000);
+  });
+
+  it("is static while paused (frozen during voting), regardless of how much wall-clock time passes", () => {
     let match = newTlMatch(5_000);
     match = transition(match, { type: "START_MATCH" }, 0);
     match = transition(match, { type: "FIRST_DONE", team: "red" }, 0);
-    const unchanged = checkTimeLimit(match, 4_999);
-    expect(unchanged).toBe(match);
-  });
-});
-
-describe("matchTimeLimitExpiry", () => {
-  it("is null before the match starts, and null when there is no configured time limit", () => {
-    expect(matchTimeLimitExpiry(newTlMatch(5_000))).toBeNull(); // still in setup
-
-    const started = transition(newMatch(), { type: "START_MATCH" }, 0); // CONFIG has matchTimeLimitMs: null
-    expect(matchTimeLimitExpiry(started)).toBeNull();
+    match = transition(match, { type: "NOMINATE" }, 1_000);
+    expect(matchTimeLimitRemainingMs(match, 1_000)).toBe(4_000);
+    expect(matchTimeLimitRemainingMs(match, 500_000)).toBe(4_000);
   });
 
-  it("is matchStartTime + matchTimeLimitMs once the match has started", () => {
+  it("ticks down in real time while advancing", () => {
     let match = newTlMatch(5_000);
-    match = transition(match, { type: "START_MATCH" }, 1_000);
-    expect(matchTimeLimitExpiry(match)).toBe(6_000);
+    match = transition(match, { type: "START_MATCH" }, 0);
+    match = transition(match, { type: "FIRST_DONE", team: "red" }, 0);
+    expect(matchTimeLimitRemainingMs(match, 0)).toBe(5_000);
+    expect(matchTimeLimitRemainingMs(match, 2_000)).toBe(3_000);
+  });
+
+  it("clamps at 0 rather than going negative once advancing runs well past the budget", () => {
+    let match = newTlMatch(5_000);
+    match = transition(match, { type: "START_MATCH" }, 0);
+    match = transition(match, { type: "FIRST_DONE", team: "red" }, 0);
+    expect(matchTimeLimitRemainingMs(match, 999_999)).toBe(0);
   });
 });
 
 describe("nextWakeTime", () => {
-  it("returns the earlier of nextArrivalTime and matchTimeLimitExpiry", () => {
-    let match = newTlMatch(200_000); // time limit far later than arrival at the edge (~90s)
+  it("returns the marker's arrival time while advancing, regardless of any configured time limit", () => {
+    let match = newTlMatch(5_000); // time limit far earlier than arrival at the edge (~90s)
     match = transition(match, { type: "START_MATCH" }, 0);
     match = transition(match, { type: "FIRST_DONE", team: "red" }, 0);
-    const arrival = nextArrivalTime(match)!;
-    const expiry = matchTimeLimitExpiry(match)!;
-    expect(arrival).toBeLessThan(expiry);
-    expect(nextWakeTime(match)).toBe(arrival);
+    expect(nextWakeTime(match)).toBe(nextArrivalTime(match));
+    expect(nextWakeTime(match)).not.toBeNull();
   });
 
-  it("returns the time limit expiry when it is earlier than the arrival estimate", () => {
-    let match = newTlMatch(1_000); // time limit far earlier than arrival at the edge (~90s)
-    match = transition(match, { type: "START_MATCH" }, 0);
-    match = transition(match, { type: "FIRST_DONE", team: "red" }, 0);
-    expect(nextWakeTime(match)).toBe(matchTimeLimitExpiry(match));
-  });
-
-  it("returns null when neither a marker arrival nor a time limit is pending", () => {
-    const idleMatch = newTlMatch(5_000); // setup: no matchStartTime yet, movement idle
-    expect(nextWakeTime(idleMatch)).toBeNull();
-  });
-
-  it("returns null once the match has finished via the time limit (no alarm re-arm loop)", () => {
+  it("returns null while frozen (voting), even with an exhausted time limit — time-limit endings are only decided at vote resolution, never by alarm", () => {
     let match = newTlMatch(5_000);
     match = transition(match, { type: "START_MATCH" }, 0);
     match = transition(match, { type: "FIRST_DONE", team: "red" }, 0);
-    match = transition(match, { type: "NOMINATE" }, 5_000);
-    expect(match.phase).toBe("finished");
-    // matchTimeLimitExpiry is phase-agnostic and would keep returning a (now past) timestamp;
-    // nextWakeTime must guard on phase itself or the server would re-arm a past-due alarm forever.
-    expect(matchTimeLimitExpiry(match)).not.toBeNull();
+    match = transition(match, { type: "NOMINATE" }, 6_000); // budget exhausted, but frozen (voting)
+    expect(match.phase).toBe("voting");
     expect(nextWakeTime(match)).toBeNull();
+  });
+
+  it("returns null while idle (setup, not yet started)", () => {
+    const idleMatch = newTlMatch(5_000);
+    expect(nextWakeTime(idleMatch)).toBeNull();
   });
 
   it("returns null once the match has finished via marker arrival while a time limit was configured", () => {

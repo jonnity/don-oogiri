@@ -67,6 +67,14 @@ export interface MatchState {
   /** START_MATCHが呼ばれた時刻（制限時間の起点）。setup中はnull。 */
   matchStartTime: number | null;
   /**
+   * 試合全体の制限時間のうち、これまでに消費済みの時間（ms）。marker が advancing だった
+   * 区間の実時間のみを積算する（idle/frozen中は消費しない＝回答中/投票中の時間稼ぎは
+   * 制限時間を圧迫しない）。advancing→非advancingに遷移するたび、その区間の経過時間を
+   * ここに畳み込む。現在advancing中の区間の消費分はこれに含まれない
+   * （matchTimeLimitRemainingMsが呼び出し時点のnowから動的に加算する）。
+   */
+  timeLimitElapsedMs: number;
+  /**
    * 「今の回答者」＝各チームの現在アクティブな回答（進んでる側の現チャンピオン回答、または
    * 阻止する側の直近の挑戦回答）を書いたメンバー名。FIRST_DONE/NOMINATEで更新される。
    * まだ誰も書き終えていなければnull。

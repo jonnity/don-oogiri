@@ -1,5 +1,11 @@
 import { useState, type FormEvent } from "react";
 import type { CreateMatchRequest } from "@don-oogiri/engine";
+import {
+  resolveLastMatchConfig,
+  resolveParticipantRoster,
+  setLastMatchConfig,
+  setParticipantRoster,
+} from "./settings.js";
 
 interface SetupFormProps {
   onCreate: (req: CreateMatchRequest) => void;
@@ -9,10 +15,11 @@ interface SetupFormProps {
 }
 
 const LANE_LENGTH = 100;
-const DEFAULT_EDGE_TO_EDGE_SECONDS = 60;
+const DEFAULT_EDGE_TO_EDGE_SECONDS = 120;
 const DEFAULT_TEAM_SIZE = 3;
 const TEAM_SIZE_OPTIONS = [1, 2, 3] as const;
-const DEFAULT_MATCH_TIME_LIMIT_MINUTES = 5;
+const DEFAULT_MATCH_TIME_LIMIT_MINUTES = 3;
+const PARTICIPANT_ROSTER_DATALIST_ID = "participant-roster";
 
 function emptyMembers(size: number): string[] {
   return Array.from({ length: size }, () => "");
@@ -23,23 +30,45 @@ function resizeMembers(members: string[], size: number): string[] {
 }
 
 export function SetupForm({ onCreate, isSubmitting, onCancel }: SetupFormProps) {
+  // ゲームのコンフィグのように、前回試合作成時に使った値を次回のデフォルトにする
+  // （メンバー名・お題は毎回入力し直すものなのでここには含めない。参加者一覧は別途roster管理）。
+  const [lastConfig] = useState(() => resolveLastMatchConfig());
   const [topic, setTopic] = useState("");
-  const [teamSize, setTeamSize] = useState<number>(DEFAULT_TEAM_SIZE);
-  const [redMembers, setRedMembers] = useState(() => emptyMembers(DEFAULT_TEAM_SIZE));
-  const [blueMembers, setBlueMembers] = useState(() => emptyMembers(DEFAULT_TEAM_SIZE));
+  const [teamSize, setTeamSize] = useState<number>(lastConfig?.teamSize ?? DEFAULT_TEAM_SIZE);
+  const [redMembers, setRedMembers] = useState(() =>
+    emptyMembers(lastConfig?.teamSize ?? DEFAULT_TEAM_SIZE),
+  );
+  const [blueMembers, setBlueMembers] = useState(() =>
+    emptyMembers(lastConfig?.teamSize ?? DEFAULT_TEAM_SIZE),
+  );
   const [edgeToEdgeSeconds, setEdgeToEdgeSeconds] = useState(
-    DEFAULT_EDGE_TO_EDGE_SECONDS,
+    lastConfig?.edgeToEdgeSeconds ?? DEFAULT_EDGE_TO_EDGE_SECONDS,
   );
-  const [timeLimitEnabled, setTimeLimitEnabled] = useState(true);
+  const [timeLimitEnabled, setTimeLimitEnabled] = useState(lastConfig?.timeLimitEnabled ?? true);
   const [matchTimeLimitMinutes, setMatchTimeLimitMinutes] = useState(
-    DEFAULT_MATCH_TIME_LIMIT_MINUTES,
+    lastConfig?.matchTimeLimitMinutes ?? DEFAULT_MATCH_TIME_LIMIT_MINUTES,
   );
+  const [roster, setRoster] = useState(() => resolveParticipantRoster());
 
   function handleTeamSizeChange(size: number) {
     setTeamSize(size);
     // 人数を変えても、既存の入力済み名前はできる範囲で保持する
     setRedMembers((prev) => resizeMembers(prev, size));
     setBlueMembers((prev) => resizeMembers(prev, size));
+  }
+
+  function handleAddToRoster(name: string) {
+    const trimmed = name.trim();
+    if (!trimmed || roster.includes(trimmed)) return;
+    const next = [...roster, trimmed];
+    setRoster(next);
+    setParticipantRoster(next);
+  }
+
+  function handleRemoveFromRoster(name: string) {
+    const next = roster.filter((n) => n !== name);
+    setRoster(next);
+    setParticipantRoster(next);
   }
 
   function handleSubmit(e: FormEvent) {
@@ -60,6 +89,7 @@ export function SetupForm({ onCreate, isSubmitting, onCancel }: SetupFormProps) 
       alert("制限時間は1分以上で入力してください");
       return;
     }
+    setLastMatchConfig({ teamSize, edgeToEdgeSeconds, timeLimitEnabled, matchTimeLimitMinutes });
     onCreate({
       config: {
         laneLength: LANE_LENGTH,
@@ -86,6 +116,11 @@ export function SetupForm({ onCreate, isSubmitting, onCancel }: SetupFormProps) 
           />
         </label>
       </fieldset>
+      <ParticipantRoster
+        roster={roster}
+        onAdd={handleAddToRoster}
+        onRemove={handleRemoveFromRoster}
+      />
       <fieldset>
         <legend>チームの人数</legend>
         <div className="team-size-picker">
@@ -137,7 +172,7 @@ export function SetupForm({ onCreate, isSubmitting, onCancel }: SetupFormProps) 
           制限時間を設ける
         </label>
         <label>
-          制限時間(分)。終了時点で優勢な方の勝ち
+          制限時間(分)。回答中・投票中は消費されず、終了時点で優勢な方の勝ち
           <input
             type="number"
             value={matchTimeLimitMinutes}
@@ -161,6 +196,64 @@ export function SetupForm({ onCreate, isSubmitting, onCancel }: SetupFormProps) 
   );
 }
 
+interface ParticipantRosterProps {
+  roster: string[];
+  onAdd: (name: string) => void;
+  onRemove: (name: string) => void;
+}
+
+/**
+ * 事前登録した参加者名のプール。メンバー欄はこのdatalistを参照するのでtype-ahead選択できる
+ * （自由入力も引き続き可能）。roster自体はlocalStorageに保存され、試合をまたいで使い回す。
+ */
+function ParticipantRoster({ roster, onAdd, onRemove }: ParticipantRosterProps) {
+  const [newName, setNewName] = useState("");
+
+  function handleAdd() {
+    onAdd(newName);
+    setNewName("");
+  }
+
+  return (
+    <fieldset className="participant-roster">
+      <legend>参加者一覧（事前登録・任意）</legend>
+      <div className="participant-roster__add">
+        <input
+          value={newName}
+          placeholder="参加者名を入力して追加"
+          onChange={(e) => setNewName(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              handleAdd();
+            }
+          }}
+        />
+        <button type="button" onClick={handleAdd} disabled={!newName.trim()}>
+          追加
+        </button>
+      </div>
+      {roster.length > 0 && (
+        <ul className="participant-roster__list">
+          {roster.map((name) => (
+            <li key={name} className="participant-roster__item">
+              {name}
+              <button type="button" onClick={() => onRemove(name)}>
+                削除
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <datalist id={PARTICIPANT_ROSTER_DATALIST_ID}>
+        {roster.map((name) => (
+          <option key={name} value={name} />
+        ))}
+      </datalist>
+    </fieldset>
+  );
+}
+
 interface TeamFieldsProps {
   color: "red" | "blue";
   label: string;
@@ -177,6 +270,7 @@ function TeamFields({ color, label, members, setMembers }: TeamFieldsProps) {
           メンバー{i + 1}
           <input
             value={m}
+            list={PARTICIPANT_ROSTER_DATALIST_ID}
             onChange={(e) => {
               const next = [...members];
               next[i] = e.target.value;

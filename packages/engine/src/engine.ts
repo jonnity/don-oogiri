@@ -65,6 +65,7 @@ export function createMatch(
     winner: null,
     matchEndReason: null,
     matchStartTime: null,
+    timeLimitElapsedMs: 0,
     currentAnswerer: { red: null, blue: null },
     audienceVotes: { red: 0, blue: 0 },
     votingRoundId: 0,
@@ -123,73 +124,92 @@ export function checkArrival(state: MatchState, now: number): MatchState {
   return state;
 }
 
-/** 制限時間の満了予定時刻。matchStartTimeが未設定(setup中)か制限時間なしならnull。 */
-export function matchTimeLimitExpiry(state: MatchState): number | null {
-  if (state.matchStartTime === null) return null;
-  if (state.config.matchTimeLimitMs === null) return null;
-  return state.matchStartTime + state.config.matchTimeLimitMs;
+/**
+ * 試合全体の制限時間の残り(ms)。制限時間なしならnull。marker が advancing だった実時間のみを
+ * 消費するため（回答中/投票中の時間稼ぎは圧迫しない）、advancing中はnowにつれて減っていき、
+ * それ以外（idle/frozen、あるいは未開始）は静的な値を返す。0未満にはならない。
+ */
+export function matchTimeLimitRemainingMs(state: MatchState, now: number): number | null {
+  const limit = state.config.matchTimeLimitMs;
+  if (limit === null) return null;
+  const liveSegment =
+    state.movement.status === "advancing"
+      ? Math.max(0, now - state.movement.startTime)
+      : 0;
+  return Math.max(0, limit - state.timeLimitElapsedMs - liveSegment);
 }
 
 /**
- * 制限時間が満了していれば即finishedにする。「その時点で優勢なチーム」＝満了時刻ちょうどの
- * マーカー位置が中央よりどちらに寄っているかで判定する（advancingTeamという「直近の勢い」ではなく、
- * レーン上の実際の占有量を「優勢」とみなす。反転直後、新しい進んでる側がまだ中央を
- * 超えていない間はこの2つが一致しないため、位置基準を優先する）。
- * ちょうど中央（＝誰も一度も前進していない試合開始直後）はadvancingTeamにフォールバックし、
- * それもnullなら引き分け(winner: null)とする。
- * 判定はnowではなく満了時刻ちょうどの位置で行う: チェックの実行が遅れて呼ばれても
- * （DOアラームの遅延等）、満了時点で本来止まっていたはずの位置を正しく再現するため。
+ * advancingから非advancingへ遷移する（＝進行が止まる）直前に呼び、その区間の経過時間を
+ * timeLimitElapsedMsへ畳み込む。advancing中でなければ何もしない。呼び出し側は、
+ * startTimeを書き換える（rebaseする）場合も含め、advancingの「区間」が終わる/切り替わる
+ * すべての箇所でこれを通すこと。通さないと、rebase前の区間の消費分が silently 消える
+ * （＝制限時間が水増しされる）。
  */
-export function checkTimeLimit(state: MatchState, now: number): MatchState {
+function foldAdvancingTime(state: MatchState, now: number): number {
+  if (state.movement.status !== "advancing") return state.timeLimitElapsedMs;
+  return state.timeLimitElapsedMs + Math.max(0, now - state.movement.startTime);
+}
+
+/**
+ * 到達判定のみを行うエントリポイント。「前進中いつでも、マーカーが相手陣地の端に到達した
+ * 瞬間に確定（投票を待たない）」を、遅延実行（DOアラームの遅延等）があっても正しく
+ * 再現するために使う。制限時間の満了判定はここでは行わない
+ * （VOTE_RESULT解決後にmaybeFinishByTimeLimitで行う。理由はその関数のコメントを参照）。
+ */
+export function checkTimers(state: MatchState, now: number): MatchState {
+  return checkArrival(state, now);
+}
+
+/**
+ * サーバがアラームを仕込むべき次の時刻（マーカーの到達予定時刻）。advancing中でない、
+ * またはfinished後はnull。制限時間の満了はアラーム駆動では判定しない
+ * （maybeFinishByTimeLimit参照）ため、ここでは考慮しない。
+ */
+export function nextWakeTime(state: MatchState): number | null {
+  if (state.phase === "finished") return null;
+  return nextArrivalTime(state);
+}
+
+/**
+ * VOTE_RESULT解決後の状態に対して、制限時間の消化状況を見て試合を終了させるかどうかを判定する。
+ * 「回答中/投票中は時間を消費しない」設計にした結果、制限時間の満了はもはや壁時計上の
+ * 一瞬のイベントではなく「advancingの累積消費時間がしきい値を超えたかどうか」という
+ * 連続的な状態になった。これを厳密に「満了した瞬間」に検出しようとすると、advancing中に
+ * 継続的なアラーム監視が必要になり複雑になる。代わりに、判定はVOTE_RESULT解決という
+ * 離散的なチェックポイントでのみ行う：
+ *   - 消化済みなら（残り<=0）、その時点のレーン占有量で「今のadvancingTeamが実際に優勢か」を見る
+ *     - 優勢が確定している（占有量の優勢側 === advancingTeam、またはadvancingTeamがいない
+ *       ＝tie_writing直後で誰も押していない）なら、今ここで確定させる
+ *     - まだ逆転の途上（advancingTeamが劣勢側から押し返している最中）なら確定させず、
+ *       次の回（阻止する側の次の指名→投票）まで継続する。これが「ラスト1答を許し、
+ *       逆転するか阻止する側が同票以上で止めるまで続く」の実装：阻止する側のNOMINATEは
+ *       消化状況に関わらず常に受理され（この関数はNOMINATE自体には一切関与しない）、
+ *       その投票が解決した時点で改めてここに来る
+ * 到達（checkArrival）は本関数と無関係に常に即座に勝敗を確定させる（spec通り、制限時間を待たない）。
+ */
+function maybeFinishByTimeLimit(state: MatchState, now: number): MatchState {
   if (state.phase === "finished") return state;
-  const expiry = matchTimeLimitExpiry(state);
-  if (expiry === null || now < expiry) return state;
-  const position = getMarkerPosition(state, expiry);
+  const remaining = matchTimeLimitRemainingMs(state, now);
+  if (remaining === null || remaining > 0) return state;
+
+  const position = getMarkerPosition(state, now);
   const center = state.config.laneLength / 2;
-  const winner: TeamId | null =
-    position > center ? "red" : position < center ? "blue" : state.advancingTeam;
+  const leader: TeamId | null = position > center ? "red" : position < center ? "blue" : null;
+
+  if (state.movement.status === "advancing" && leader !== null && leader !== state.advancingTeam) {
+    // まだ逆転の途上：確定させず、次の指名・投票で改めて判定する
+    return state;
+  }
+
+  const winner = leader ?? state.advancingTeam;
   return {
     ...state,
     phase: "finished",
     winner,
     matchEndReason: "time_limit",
-    movement: { status: "frozen", position },
+    movement: state.movement.status === "advancing" ? { status: "frozen", position } : state.movement,
   };
-}
-
-/**
- * 到達判定と制限時間判定をまとめて行う唯一のエントリポイント。両方が満了済みの場合は、
- * 「先に本来起きていたはずの方」（＝満了予定時刻がより早い方）を採用する。片方の判定で
- * finishedになった時点でもう片方の予定時刻は意味を失う（マーカーが止まるため）ため、
- * 両方を独立に適用せず必ずどちらか一方だけを適用する。
- */
-export function checkTimers(state: MatchState, now: number): MatchState {
-  if (state.phase === "finished") return state;
-  const arrival = nextArrivalTime(state);
-  const expiry = matchTimeLimitExpiry(state);
-  const arrivalDue = arrival !== null && now >= arrival;
-  const expiryDue = expiry !== null && now >= expiry;
-  if (!arrivalDue && !expiryDue) return state;
-  if (expiryDue && (!arrivalDue || expiry! <= arrival!)) {
-    return checkTimeLimit(state, now);
-  }
-  return checkArrival(state, now);
-}
-
-/**
- * サーバがアラームを仕込むべき次の時刻（到達予定 or 制限時間満了のうち早い方）。両方なければnull。
- * finished後はnull: matchTimeLimitExpiryはphaseを見ないため、試合終了後もmatchStartTime基準の
- * 満了時刻（＝すでに過去）を返し続ける。ここでガードしないとDOアラームが過去時刻で
- * 即座に発火→checkTimersは何もしない(同一参照を返す)→再度syncAlarmが同じ過去時刻を
- * 設定、を無限に繰り返してしまう。
- */
-export function nextWakeTime(state: MatchState): number | null {
-  if (state.phase === "finished") return null;
-  const arrival = nextArrivalTime(state);
-  const expiry = matchTimeLimitExpiry(state);
-  if (arrival === null) return expiry;
-  if (expiry === null) return arrival;
-  return Math.min(arrival, expiry);
 }
 
 function startAdvancing(
@@ -271,10 +291,13 @@ function applyNominate(state: MatchState, now: number): MatchState {
   // NOMINATE可能な時点(movement.status==="advancing")ではstartAdvancing済みのため、
   // defendingTeamは常にセットされている。
   const writer = state.defendingTeam;
+  // 制限時間の消化状況に関わらずNOMINATEは常に受理する（ラスト1答を許す）。
+  // ここでadvancingが終わるため、この区間の消費分を畳み込んでおく。
   return {
     ...state,
     phase: "voting",
     movement: { status: "frozen", position },
+    timeLimitElapsedMs: foldAdvancingTime(state, now),
     audienceVotes: { red: 0, blue: 0 },
     votingRoundId: state.votingRoundId + 1,
     currentAnswerer: writer
@@ -379,7 +402,7 @@ function applyVoteResult(
       incrementRunner(state, defendingTeam),
       advancingTeam,
     );
-    return {
+    const tieResult: MatchState = {
       ...withBothRotated,
       phase: "tie_writing",
       advancingTeam: null,
@@ -387,6 +410,8 @@ function applyVoteResult(
       bothWritingFirstDone: false,
       movement: { status: "frozen", position: frozenPosition },
     };
+    // 押している側がいない(=誰も優劣を争っていない)ので、制限時間消化済みなら逆転の余地なく即確定する。
+    return maybeFinishByTimeLimit(tieResult, now);
   }
 
   if (!defendingWins) {
@@ -398,7 +423,7 @@ function applyVoteResult(
       frozenPosition,
       now,
     );
-    return { ...resumed, phase: "challenge_writing" };
+    return maybeFinishByTimeLimit({ ...resumed, phase: "challenge_writing" }, now);
   }
 
   // 阻止する側の勝ち（反転）: この位置から反転。負けた側(旧advancing)の次走者が新defenderとして執筆。
@@ -409,7 +434,7 @@ function applyVoteResult(
     frozenPosition,
     now,
   );
-  return { ...reversed, phase: "challenge_writing" };
+  return maybeFinishByTimeLimit({ ...reversed, phase: "challenge_writing" }, now);
 }
 
 /** お題の訂正（誤字修正など）。spec通り「1試合1お題固定」なのでゲーム進行上の変更ではなく、あくまで表記の訂正用途。 */
@@ -444,9 +469,12 @@ function applySetSpeedMultiplier(
     return { ...state, speedMultiplier: multiplier };
   }
   const currentPosition = getMarkerPosition(state, now);
+  // startTimeをnowへrebaseする前に、この区間の消費分を畳み込んでおく
+  // （畳み込まないと、rebaseのたびに消費済み時間が水増しでリセットされてしまう）。
   const rebased: MatchState = {
     ...state,
     speedMultiplier: multiplier,
+    timeLimitElapsedMs: foldAdvancingTime(state, now),
     movement: {
       status: "advancing",
       startPosition: currentPosition,
@@ -485,8 +513,10 @@ function applyCorrectMarkerPosition(
   if (state.movement.status === "frozen") {
     return { ...state, movement: { status: "frozen", position: clamped } };
   }
+  // startTimeをnowへrebaseする前に、この区間の消費分を畳み込んでおく（理由はSET_SPEED_MULTIPLIER側と同様）。
   const rebased: MatchState = {
     ...state,
+    timeLimitElapsedMs: foldAdvancingTime(state, now),
     movement: {
       status: "advancing",
       startPosition: clamped,
@@ -518,6 +548,7 @@ function applyResetMatch(state: MatchState): MatchState {
     winner: null,
     matchEndReason: null,
     matchStartTime: null,
+    timeLimitElapsedMs: 0,
     currentAnswerer: { red: null, blue: null },
     audienceVotes: { red: 0, blue: 0 },
   };

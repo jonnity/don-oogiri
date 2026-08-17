@@ -1,6 +1,8 @@
 const SERVER_URL_KEY = "donOogiri.serverUrl";
 const AUDIENCE_BASE_URL_KEY = "donOogiri.audienceBaseUrl";
 const MATCH_ID_KEY = "donOogiri.matchId";
+const PARTICIPANT_ROSTER_KEY = "donOogiri.participantRoster";
+const LAST_MATCH_CONFIG_KEY = "donOogiri.lastMatchConfig";
 const DEFAULT_SERVER_PORT = "8787";
 const DEFAULT_AUDIENCE_PORT = "5174";
 
@@ -84,4 +86,55 @@ export function setStoredMatchId(matchId: string): void {
 
 export function clearStoredMatchId(): void {
   removeStored(MATCH_ID_KEY);
+}
+
+/** 参加者一覧（事前登録した名前のプール）。試合作成フォームのメンバー欄で選択入力するために使う。 */
+export function resolveParticipantRoster(): string[] {
+  const stored = readStored(PARTICIPANT_ROSTER_KEY);
+  if (!stored) return [];
+  try {
+    const parsed: unknown = JSON.parse(stored);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((v): v is string => typeof v === "string");
+  } catch {
+    return [];
+  }
+}
+
+export function setParticipantRoster(names: readonly string[]): void {
+  writeStored(PARTICIPANT_ROSTER_KEY, JSON.stringify(names));
+}
+
+/** 試合作成フォームの「最後に使った設定」。ゲームのコンフィグのように、次回作成時のデフォルト値として使う。 */
+export interface LastMatchConfig {
+  teamSize: number;
+  edgeToEdgeSeconds: number;
+  timeLimitEnabled: boolean;
+  matchTimeLimitMinutes: number;
+}
+
+function isLastMatchConfig(value: unknown): value is LastMatchConfig {
+  if (typeof value !== "object" || value === null) return false;
+  const v = value as Record<string, unknown>;
+  return (
+    typeof v.teamSize === "number" &&
+    typeof v.edgeToEdgeSeconds === "number" &&
+    typeof v.timeLimitEnabled === "boolean" &&
+    typeof v.matchTimeLimitMinutes === "number"
+  );
+}
+
+export function resolveLastMatchConfig(): LastMatchConfig | null {
+  const stored = readStored(LAST_MATCH_CONFIG_KEY);
+  if (!stored) return null;
+  try {
+    const parsed: unknown = JSON.parse(stored);
+    return isLastMatchConfig(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+export function setLastMatchConfig(config: LastMatchConfig): void {
+  writeStored(LAST_MATCH_CONFIG_KEY, JSON.stringify(config));
 }

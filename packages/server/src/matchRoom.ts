@@ -33,6 +33,9 @@ function normalizeMatch(match: MatchState): MatchState {
     // 補う。300000のような既定値で埋めると、進行中の旧試合が復元直後に強制終了しかねない。
     matchStartTime: match.matchStartTime ?? null,
     matchEndReason: match.matchEndReason ?? null,
+    // 制限時間の消費量トラッキングもこのバージョンで追加されたフィールド。旧データは
+    // まだ何も消費していない(0)として補う。
+    timeLimitElapsedMs: match.timeLimitElapsedMs ?? 0,
     config: { ...match.config, matchTimeLimitMs: match.config.matchTimeLimitMs ?? null },
   };
 }

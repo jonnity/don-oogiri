@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { currentWriters, type MatchEvent, type MatchState, type TeamId } from "@don-oogiri/engine";
 
 interface MatchControlsProps {
@@ -15,8 +15,54 @@ const PHASE_LABEL: Record<MatchState["phase"], string> = {
   finished: "試合終了",
 };
 
+const ARROW_KEYS = new Set(["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"]);
+const TEXT_INPUT_TAGS = new Set(["INPUT", "TEXTAREA", "SELECT"]);
+
+/**
+ * 回答者席を見ながら操作できるよう、指名系の操作を矢印キーに割り当てる。
+ * どちらの指名か指定する必要がない場合（NOMINATE）はいずれかの矢印キー、
+ * 赤/青を指定する必要がある場合（FIRST_DONE）は赤=左キー・青=右キー。
+ * renderActionsが今実際に表示しているアクションとだけ対応させ、投票確定(CLOSE_VOTING)や
+ * 試合開始(START_MATCH)など誤操作の被害が大きい操作は割り当てない。
+ */
+function useNominationHotkeys(state: MatchState, onSend: (event: MatchEvent) => void) {
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.repeat || !ARROW_KEYS.has(e.key)) return;
+      const target = e.target as HTMLElement | null;
+      if (target && TEXT_INPUT_TAGS.has(target.tagName)) return;
+
+      const inBothWritingPhase =
+        state.phase === "initial_writing" || state.phase === "tie_writing";
+
+      if (inBothWritingPhase && !state.bothWritingFirstDone) {
+        if (e.key === "ArrowLeft") {
+          e.preventDefault();
+          onSend({ type: "FIRST_DONE", team: "red" });
+        } else if (e.key === "ArrowRight") {
+          e.preventDefault();
+          onSend({ type: "FIRST_DONE", team: "blue" });
+        }
+        return;
+      }
+
+      if (
+        (inBothWritingPhase || state.phase === "challenge_writing") &&
+        state.movement.status === "advancing"
+      ) {
+        e.preventDefault();
+        onSend({ type: "NOMINATE" });
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [state.phase, state.bothWritingFirstDone, state.movement.status, onSend]);
+}
+
 export function MatchControls({ state, onSend }: MatchControlsProps) {
   const writers = currentWriters(state);
+  useNominationHotkeys(state, onSend);
 
   return (
     <div className="match-controls">

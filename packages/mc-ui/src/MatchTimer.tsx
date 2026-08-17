@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { matchTimeLimitExpiry, type MatchState } from "@don-oogiri/engine";
+import { matchTimeLimitRemainingMs, type MatchState } from "@don-oogiri/engine";
 
 interface MatchTimerProps {
   state: MatchState;
@@ -17,24 +17,24 @@ function formatMs(ms: number): string {
 }
 
 /**
- * 試合全体の制限時間の残り表示。制限時間はサーバ権威(matchStartTime + config.matchTimeLimitMs)
- * で判定され、満了時点で優勢なチームの勝ちとしてエンジン側が自動的にfinishedへ遷移させる
- * （このコンポーネントは表示のみで、確定の判定ロジックは持たない）。
- * START_MATCH前(matchStartTime未設定)はまだカウントが始まっていないので、
- * カウントダウンはせず設定されている制限時間をそのまま静的に表示する。
+ * 試合全体の制限時間の残り表示。マーカーがadvancingだった実時間だけを消費するため
+ * （回答中/投票中の時間稼ぎは圧迫しない）、カウントダウンするのはadvancing中だけで、
+ * それ以外（未開始・回答中の執筆待ち・投票中）は残り時間を静的に表示する。
+ * 消化しきった後もadvancingが続く場合（サドンデス：逆転するか阻止されるまで試合は続く。
+ * エンジン側の判定ロジックはmaybeFinishByTimeLimit参照）は「延長中」を表示する。
  */
 export function MatchTimer({ state, clockOffset }: MatchTimerProps) {
   const timeLimitMs = state.config.matchTimeLimitMs;
-  const expiry = matchTimeLimitExpiry(state);
+  const isAdvancing = state.movement.status === "advancing";
   const [now, setNow] = useState(() => Date.now() + clockOffset);
 
   useEffect(() => {
-    if (expiry === null || state.phase === "finished") return undefined;
+    if (!isAdvancing || state.phase === "finished") return undefined;
     const tick = () => setNow(Date.now() + clockOffset);
     tick();
     const id = setInterval(tick, TICK_INTERVAL_MS);
     return () => clearInterval(id);
-  }, [expiry, clockOffset, state.phase]);
+  }, [isAdvancing, clockOffset, state.phase]);
 
   if (timeLimitMs === null) return null;
 
@@ -43,17 +43,17 @@ export function MatchTimer({ state, clockOffset }: MatchTimerProps) {
     return <p className="match-timer match-timer--expired">{formatMs(0)}</p>;
   }
 
-  if (expiry === null) {
-    // まだSTART_MATCH前。カウントダウンはせず、設定値を静止表示するだけ。
-    return <p className="match-timer">{formatMs(timeLimitMs)}</p>;
-  }
+  // configで制限時間ありと確認済みのため、この時点でnullになることはない。
+  const remainingMs = matchTimeLimitRemainingMs(state, now)!;
+  const isOvertime = remainingMs <= 0;
+  const isUrgent = !isOvertime && remainingMs <= URGENT_THRESHOLD_MS;
+  const className = [
+    "match-timer",
+    isUrgent && "match-timer--urgent",
+    isOvertime && "match-timer--overtime",
+  ]
+    .filter(Boolean)
+    .join(" ");
 
-  const remainingMs = Math.max(0, expiry - now);
-  const isUrgent = remainingMs <= URGENT_THRESHOLD_MS;
-
-  return (
-    <p className={`match-timer${isUrgent ? " match-timer--urgent" : ""}`}>
-      {formatMs(remainingMs)}
-    </p>
-  );
+  return <p className={className}>{isOvertime ? "延長中" : formatMs(remainingMs)}</p>;
 }
