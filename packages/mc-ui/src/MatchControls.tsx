@@ -15,58 +15,90 @@ const PHASE_LABEL: Record<MatchState["phase"], string> = {
   finished: "試合終了",
 };
 
-const ARROW_KEYS = new Set(["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"]);
+type HotkeyId = "start_match" | "first_done_red" | "first_done_blue" | "nominate" | "close_voting";
+
+interface HotkeyAction {
+  id: HotkeyId;
+  event: MatchEvent;
+  keys: readonly string[];
+  /** ボタン脇・凡例に表示する短いラベル。 */
+  keyHint: string;
+}
+
+const ANY_ARROW_KEYS = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"] as const;
+const ANY_ARROW_HINT = "矢印キー";
 const TEXT_INPUT_TAGS = new Set(["INPUT", "TEXTAREA", "SELECT"]);
 
 /**
- * 回答者席を見ながら操作できるよう、指名系の操作を矢印キーに割り当てる。
- * どちらの指名か指定する必要がない場合（NOMINATE）はいずれかの矢印キー、
- * 赤/青を指定する必要がある場合（FIRST_DONE）は赤=左キー・青=右キー。
- * renderActionsが今実際に表示しているアクションとだけ対応させ、投票確定(CLOSE_VOTING)や
- * 試合開始(START_MATCH)など誤操作の被害が大きい操作は割り当てない。
+ * 今この瞬間キーボードから叩ける操作の一覧（renderActionsが表示するボタンと一対一）。
+ * キー割り当てのボタン表示(KeyHint)とキー入力の実処理(useHotkeys)の両方がこの一箇所だけを
+ * 参照するようにして、表示と実際の挙動がズレないようにする。
+ * どちらのチームか指定する必要がある操作（執筆完了）は赤=左キー・青=右キー、
+ * 指定不要な操作（試合開始・指名・投票締め切り）はいずれかの矢印キー。
  */
-function useNominationHotkeys(state: MatchState, onSend: (event: MatchEvent) => void) {
+function getHotkeyActions(state: MatchState): HotkeyAction[] {
+  if (state.phase === "setup") {
+    return [
+      { id: "start_match", event: { type: "START_MATCH" }, keys: ANY_ARROW_KEYS, keyHint: ANY_ARROW_HINT },
+    ];
+  }
+
+  const inBothWritingPhase = state.phase === "initial_writing" || state.phase === "tie_writing";
+
+  if (inBothWritingPhase && !state.bothWritingFirstDone) {
+    return [
+      { id: "first_done_red", event: { type: "FIRST_DONE", team: "red" }, keys: ["ArrowLeft"], keyHint: "←" },
+      { id: "first_done_blue", event: { type: "FIRST_DONE", team: "blue" }, keys: ["ArrowRight"], keyHint: "→" },
+    ];
+  }
+
+  if ((inBothWritingPhase || state.phase === "challenge_writing") && state.movement.status === "advancing") {
+    return [{ id: "nominate", event: { type: "NOMINATE" }, keys: ANY_ARROW_KEYS, keyHint: ANY_ARROW_HINT }];
+  }
+
+  if (state.phase === "voting") {
+    return [
+      { id: "close_voting", event: { type: "CLOSE_VOTING" }, keys: ANY_ARROW_KEYS, keyHint: ANY_ARROW_HINT },
+    ];
+  }
+
+  return [];
+}
+
+/**
+ * 回答者席を見ながら操作できるよう、getHotkeyActionsが今有効だとする操作を矢印キーで叩けるようにする。
+ * 観客投票を使わない場合の票数手入力(VoteForm)や運用ツール(OpsPanel)など、進行の主線から外れる・
+ * 数値入力を伴う操作にはキーを割り当てない。
+ */
+function useHotkeys(state: MatchState, onSend: (event: MatchEvent) => void) {
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
-      if (e.repeat || !ARROW_KEYS.has(e.key)) return;
+      if (e.repeat) return;
       const target = e.target as HTMLElement | null;
       if (target && TEXT_INPUT_TAGS.has(target.tagName)) return;
 
-      const inBothWritingPhase =
-        state.phase === "initial_writing" || state.phase === "tie_writing";
-
-      if (inBothWritingPhase && !state.bothWritingFirstDone) {
-        if (e.key === "ArrowLeft") {
-          e.preventDefault();
-          onSend({ type: "FIRST_DONE", team: "red" });
-        } else if (e.key === "ArrowRight") {
-          e.preventDefault();
-          onSend({ type: "FIRST_DONE", team: "blue" });
-        }
-        return;
-      }
-
-      if (
-        (inBothWritingPhase || state.phase === "challenge_writing") &&
-        state.movement.status === "advancing"
-      ) {
-        e.preventDefault();
-        onSend({ type: "NOMINATE" });
-      }
+      const action = getHotkeyActions(state).find((a) => a.keys.includes(e.key));
+      if (!action) return;
+      e.preventDefault();
+      onSend(action.event);
     }
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [state.phase, state.bothWritingFirstDone, state.movement.status, onSend]);
+  }, [state, onSend]);
 }
 
 export function MatchControls({ state, onSend }: MatchControlsProps) {
   const writers = currentWriters(state);
-  useNominationHotkeys(state, onSend);
+  useHotkeys(state, onSend);
 
   return (
     <div className="match-controls">
       <h2>状態</h2>
+      <p className="hotkey-legend">
+        ⌨️ 矢印キーで操作可（対応する操作はボタンに表示）。赤/青の指定が要る操作は 🔴=←
+        /🔵=→、不要な操作はいずれかの矢印キー
+      </p>
       <WritingStatusBanner state={state} writers={writers} />
       <dl className="status-grid">
         <dt>お題</dt>
@@ -130,9 +162,22 @@ function teamLabel(state: MatchState, team: TeamId): string {
   return `${team === "red" ? "🔴" : "🔵"} ${state.teams[team].name}`;
 }
 
+function KeyHint({ hotkeys, id }: { hotkeys: HotkeyAction[]; id: HotkeyId }) {
+  const label = hotkeys.find((a) => a.id === id)?.keyHint;
+  if (!label) return null;
+  return <span className="key-hint">{label}</span>;
+}
+
 function renderActions(state: MatchState, onSend: (event: MatchEvent) => void) {
+  const hotkeys = getHotkeyActions(state);
+
   if (state.phase === "setup") {
-    return <button onClick={() => onSend({ type: "START_MATCH" })}>試合開始</button>;
+    return (
+      <button onClick={() => onSend({ type: "START_MATCH" })}>
+        試合開始
+        <KeyHint hotkeys={hotkeys} id="start_match" />
+      </button>
+    );
   }
 
   const inBothWritingPhase = state.phase === "initial_writing" || state.phase === "tie_writing";
@@ -142,9 +187,11 @@ function renderActions(state: MatchState, onSend: (event: MatchEvent) => void) {
       <>
         <button onClick={() => onSend({ type: "FIRST_DONE", team: "red" })}>
           🔴 赤チーム 執筆完了（先着）
+          <KeyHint hotkeys={hotkeys} id="first_done_red" />
         </button>
         <button onClick={() => onSend({ type: "FIRST_DONE", team: "blue" })}>
           🔵 青チーム 執筆完了（先着）
+          <KeyHint hotkeys={hotkeys} id="first_done_blue" />
         </button>
       </>
     );
@@ -152,7 +199,10 @@ function renderActions(state: MatchState, onSend: (event: MatchEvent) => void) {
 
   if ((inBothWritingPhase || state.phase === "challenge_writing") && state.movement.status === "advancing") {
     return (
-      <button onClick={() => onSend({ type: "NOMINATE" })}>指名（前進ストップ→投票開始）</button>
+      <button onClick={() => onSend({ type: "NOMINATE" })}>
+        指名（前進ストップ→投票開始）
+        <KeyHint hotkeys={hotkeys} id="nominate" />
+      </button>
     );
   }
 
@@ -164,6 +214,8 @@ function renderActions(state: MatchState, onSend: (event: MatchEvent) => void) {
 }
 
 function VotingControls({ state, onSend }: MatchControlsProps) {
+  const hotkeys = getHotkeyActions(state);
+
   return (
     <div className="voting-controls">
       <p className="audience-tally">
@@ -171,6 +223,7 @@ function VotingControls({ state, onSend }: MatchControlsProps) {
       </p>
       <button className="close-voting" onClick={() => onSend({ type: "CLOSE_VOTING" })}>
         投票を締め切る（この集計で確定）
+        <KeyHint hotkeys={hotkeys} id="close_voting" />
       </button>
       <details className="manual-vote-fallback">
         <summary>観客投票を使わない場合：票数を手入力して確定</summary>

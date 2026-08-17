@@ -79,6 +79,26 @@ button {
   font-weight: bold;
 }
 
+.hotkey-legend {
+  font-size: 0.85rem;
+  color: #555;
+  background: #eef1f4;
+  border-radius: 6px;
+  padding: 0.4rem 0.6rem;
+  margin: 0 0 0.75rem;
+}
+
+.key-hint {
+  display: inline-block;
+  margin-left: 0.5rem;
+  padding: 0.1rem 0.5rem;
+  border-radius: 4px;
+  background: #fff;
+  border: 1px solid #999;
+  color: #333;
+  font-size: 0.8rem;
+}
+
 .writing-status {
   display: flex;
   align-items: center;
