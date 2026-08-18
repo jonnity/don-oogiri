@@ -6,12 +6,16 @@ interface MatchControlsProps {
   onSend: (event: MatchEvent) => void;
 }
 
+/**
+ * 投影画面（MarkerBar.describeStatus）と同じ言葉遣いに揃えた、フェーズの短い説明。
+ * MCと投影画面を見比べたときに表記が食い違わないようにする。
+ */
 const PHASE_LABEL: Record<MatchState["phase"], string> = {
   setup: "準備中",
-  initial_writing: "INITIAL_WRITING（両チーム執筆中）",
-  voting: "VOTE（観客投票中）",
-  challenge_writing: "CHALLENGE_WRITING",
-  tie_writing: "TIE_WRITING（同数につき両チーム書き直し中）",
+  initial_writing: "両チーム回答中",
+  voting: "投票中",
+  challenge_writing: "阻止する側が挑戦の回答を執筆中",
+  tie_writing: "同数につき両チーム書き直し中（両チーム回答中）",
   finished: "試合終了",
 };
 
@@ -225,10 +229,10 @@ function VotingControls({ state, onSend }: MatchControlsProps) {
         投票を締め切る（この集計で確定）
         <KeyHint hotkeys={hotkeys} id="close_voting" />
       </button>
-      <details className="manual-vote-fallback">
-        <summary>観客投票を使わない場合：票数を手入力して確定</summary>
+      <fieldset className="manual-vote-fallback">
+        <legend>観客投票を使わない場合：票数を手入力して確定</legend>
         <VoteForm onSend={onSend} />
-      </details>
+      </fieldset>
     </div>
   );
 }

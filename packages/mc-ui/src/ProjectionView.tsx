@@ -52,7 +52,9 @@ export function ProjectionView({ serverUrl, audienceBaseUrl, matchId }: Projecti
       </div>
       {state.phase === "finished" && (
         <p className="projection__winner">
-          {state.winner ? `🏆 勝者: ${state.teams[state.winner].name}` : "🤝 引き分け"}
+          {state.winner
+            ? `🏆 勝者: ${state.winner === "red" ? "🔴" : "🔵"} ${state.teams[state.winner].name}`
+            : "🤝 引き分け"}
           {state.matchEndReason === "time_limit" && "（時間切れ）"}
         </p>
       )}

@@ -121,7 +121,31 @@ export function App() {
 
   return (
     <main className="app">
-      <h1>ドン大喜利 MC操作卓</h1>
+      <header className="app-header">
+        <h1>ドン大喜利 MC操作卓</h1>
+        <div className="app-header__row">
+          <span>接続先: {serverUrl}</span>
+          <div className="app-header__actions">
+            <button onClick={() => setShowSettings(true)}>接続設定を変更</button>
+          </div>
+        </div>
+        {matchId && (
+          <div className="app-header__row">
+            <span>
+              接続: {status} / matchId: {matchId}
+            </span>
+            <div className="app-header__actions">
+              {!showSetupForm && (
+                <button onClick={handleStartNewMatch}>次の試合を作る</button>
+              )}
+              <button onClick={handleOpenProjection}>投影画面を開く</button>
+              <button className="button-danger" onClick={handleAbandonSession}>
+                セッションを破棄して新規開始
+              </button>
+            </div>
+          </div>
+        )}
+      </header>
 
       {showSetupForm && (
         <SetupForm
@@ -132,31 +156,22 @@ export function App() {
       )}
       {createError && <p className="error">{createError}</p>}
 
-      <p className="connection-status">
-        接続先: {serverUrl}{" "}
-        <button onClick={() => setShowSettings(true)}>接続設定を変更</button>
-      </p>
-
       {matchId && (
         <>
-          <p className="connection-status">
-            接続: {status} / matchId: {matchId}{" "}
-            {!showSetupForm && (
-              <button onClick={handleStartNewMatch}>次の試合を作る</button>
-            )}{" "}
-            <button onClick={handleOpenProjection}>投影画面を開く</button>{" "}
-            <button onClick={handleAbandonSession}>セッションを破棄して新規開始</button>
-          </p>
           {lastError && <p className="error">サーバーエラー: {lastError}</p>}
           <AudienceLink matchId={matchId} audienceBaseUrl={audienceBaseUrl} />
           {!showSetupForm &&
             (state ? (
-              <>
-                <MarkerBar state={state} clockOffset={clockOffset} />
-                <MatchTimer state={state} clockOffset={clockOffset} />
-                <MatchControls state={state} onSend={sendEvent} />
-                <OpsPanel state={state} onSend={sendEvent} />
-              </>
+              <div className="app-layout">
+                <div className="app-layout__main">
+                  <MarkerBar state={state} clockOffset={clockOffset} />
+                  <MatchTimer state={state} clockOffset={clockOffset} />
+                  <MatchControls state={state} onSend={sendEvent} />
+                </div>
+                <div className="app-layout__side">
+                  <OpsPanel state={state} onSend={sendEvent} />
+                </div>
+              </div>
             ) : (
               <p>状態を読み込み中...</p>
             ))}

@@ -13,20 +13,40 @@ const SPEED_PRESETS = [
 ];
 
 /**
- * Phase 5: 運用機能（前進速度のライブ調整、マーカー位置の手動補正、試合リセット、お題の訂正、
- * QRコード表示切り替え）をまとめたMC操作卓のパネル。トラブルリカバリ用途なので、
- * 通常の試合進行操作（MatchControls）とは分けて折りたたみ表示にする。
+ * Phase 5: 運用機能（前進速度のライブ調整、マーカー位置の手動補正、試合リセット、お題の訂正）
+ * をまとめたMC操作卓のパネル。トラブルリカバリ用途で普段は触らないため、通常の試合進行操作
+ * （MatchControls）とは分ける。折りたたんで隠すのではなく、有効化トグルをオフにした状態で
+ * 常に見える位置に置き、中身をグレーアウト＋操作不可（fieldset disabled）にする。
+ * 「そういう機能があること」自体は一目でわかり、誤操作は有効化するまで起きない。
  */
 export function OpsPanel({ state, onSend }: OpsPanelProps) {
+  const [enabled, setEnabled] = useState(false);
+
   return (
-    <details className="ops-panel">
-      <summary>運用ツール（速度調整・位置補正・リセット等）</summary>
-      <TopicEditor state={state} onSend={onSend} />
-      <QrToggle state={state} onSend={onSend} />
-      <SpeedControls state={state} onSend={onSend} />
-      <MarkerCorrection state={state} onSend={onSend} />
-      <ResetControl onSend={onSend} />
-    </details>
+    <div className="ops-panel">
+      <div className="ops-panel__header">
+        <div>
+          <p className="ops-panel__title">運用ツール（速度調整・位置補正・リセット等）</p>
+          {!enabled && (
+            <p className="ops-panel__hint">誤操作防止のため無効化中。操作するには有効化してください。</p>
+          )}
+        </div>
+        <button
+          type="button"
+          className="ops-panel__toggle"
+          aria-pressed={enabled}
+          onClick={() => setEnabled((v) => !v)}
+        >
+          {enabled ? "運用ツールを無効化" : "運用ツールを有効化"}
+        </button>
+      </div>
+      <fieldset disabled={!enabled} className="ops-panel__body">
+        <TopicEditor state={state} onSend={onSend} />
+        <SpeedControls state={state} onSend={onSend} />
+        <MarkerCorrection state={state} onSend={onSend} />
+        <ResetControl onSend={onSend} />
+      </fieldset>
+    </div>
   );
 }
 
@@ -45,20 +65,6 @@ function TopicEditor({ state, onSend }: OpsPanelProps) {
         onClick={() => onSend({ type: "SET_TOPIC", topic: topic.trim() })}
       >
         お題を修正
-      </button>
-    </fieldset>
-  );
-}
-
-function QrToggle({ state, onSend }: OpsPanelProps) {
-  return (
-    <fieldset className="ops-panel__section">
-      <legend>投影画面のQRコード</legend>
-      <p>現在: {state.qrVisible ? "表示中" : "非表示"}</p>
-      <button
-        onClick={() => onSend({ type: "SET_QR_VISIBLE", visible: !state.qrVisible })}
-      >
-        {state.qrVisible ? "QRコードを隠す" : "QRコードを表示する"}
       </button>
     </fieldset>
   );
