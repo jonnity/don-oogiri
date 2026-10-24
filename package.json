@@ -14,9 +14,18 @@
     "dev:audience-ui": "pnpm --filter @don-oogiri/audience-ui dev",
     "build": "pnpm -r build",
     "tauri:dev": "pnpm --filter @don-oogiri/mc-ui tauri dev",
-    "tauri:build": "pnpm --filter @don-oogiri/mc-ui tauri build"
+    "tauri:build": "pnpm --filter @don-oogiri/mc-ui tauri build",
+    "demo": "tsx scripts/demo.ts",
+    "demo:publish": "tsx scripts/demo-publish.ts",
+    "demo:typecheck": "tsc --noEmit -p e2e/demo/tsconfig.json",
+    "demo:test": "tsx --test e2e/demo/support/*.test.ts"
   },
   "devDependencies": {
-    "concurrently": "^9.1.0"
+    "@don-oogiri/engine": "workspace:*",
+    "@playwright/test": "1.64.1",
+    "@types/node": "^24.19.2",
+    "concurrently": "^9.1.0",
+    "tsx": "4.23.15",
+    "typescript": "5.6.3"
   }
 }

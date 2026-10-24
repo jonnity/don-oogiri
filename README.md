@@ -31,6 +31,24 @@ MC操作卓・観客投票ページはいずれも、アクセスしているホ
 
 観客投票ページは `http://<host>:5174/?m=<matchId>` で試合に参加する。MC操作卓の投影画面にはこのURLのQRコードが表示される。
 
+### PR用デモ動画
+
+WSL2で `pnpm demo` を実行すると、専用ポートでローカルの3サービスを起動し、実アプリのMC操作卓・投影画面・観客スマホをheadless Chromiumで操作・録画します。終了時に3画面を1本のMP4へ合成してサービスを片付けます。
+
+```bash
+# 初回のみ（sudoが必要な場合あり）
+pnpm exec playwright install --with-deps chromium
+sudo apt-get update
+sudo apt-get install -y ffmpeg fonts-noto-cjk fonts-dejavu-core
+
+pnpm demo                         # 基準シナリオ basic
+pnpm demo issue-1-vote-change      # 指定したシナリオだけ撮影
+# 出力: .demo-artifacts/<run-id>/demo.mp4
+pnpm demo:publish --pr 123 --run .demo-artifacts/<run-id>
+```
+
+UIに触るPRでは変更内容を見せる `e2e/demo/scenarios/pr-<N>-<内容>.spec.ts` を書き、`pnpm demo pr-<N>-<内容>` で選択して撮影します。動画はgitに入れず、PRにはRelease assetのリンクを共有します。Discordの承認依頼には `harness-phase <issue> awaiting-merge --pr <PR番号> --comment-file <本文ファイル> --file <MP4絶対パス>` で実ファイルを添付します。初回導入・共通操作・投稿条件・トラブル対応は [docs/demo.md](./docs/demo.md) を参照してください。
+
 ### Tauriネイティブアプリ（Phase 3）
 
 ```bash
