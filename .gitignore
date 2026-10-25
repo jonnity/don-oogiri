@@ -5,3 +5,8 @@ dist/
 .DS_Store
 .vscode/
 coverage/
+
+# Local PR demo recordings and diagnostics
+/.demo-artifacts/
+/test-results/
+/playwright-report/
